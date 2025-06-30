@@ -1,6 +1,5 @@
-# --- DOSYA: main.py (v30 - SADE VE GÜÇLÜ FİNAL SÜRÜMÜ) ---
-# Bütün kafa siken, çalışmayan NagiChecker birimi imha edildi.
-# Sadece taş gibi çalışan /puan komutu kaldı.
+# --- DOSYA: main.py (v32 - Ordu Büyütme) ---
+# Admin limiti 5000'e yükseltildi.
 
 import logging, requests, time, os, re, json, io
 from urllib.parse import quote
@@ -27,7 +26,7 @@ except ImportError:
     print("KRİTİK HATA: 'bot_token.py' dosyası bulunamadı!"); exit()
 
 # -----------------------------------------------------------------------------
-# 3. BİRİM: İSTİHBARAT & OPERASYON (TEK VE GÜÇLÜ BİRİM)
+# 3. BİRİM: İSTİHBARAT & OPERASYON
 # -----------------------------------------------------------------------------
 class PuanChecker:
     def __init__(self, key):
@@ -123,6 +122,8 @@ async def puan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Bu komutu kullanmak için önce /start yazarak bir anahtar aktive etmelisin."); return
     keyboard = [[InlineKeyboardButton("Tekli Kontrol", callback_data="mode_single"), InlineKeyboardButton("Çoklu Kontrol", callback_data="mode_multiple")]]
     await update.message.reply_text(f"**PUAN** cephesi seçildi. Tarama modunu seç Lord'um:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
+    parser_example = ("Toplu kontrol yaparken `.txt` dosyanızı aşağıdaki gibi hazırlayınız:\n\n<pre>5522898050712020|02|28|000\n5522898050712020|02|28|000</pre>")
+    await update.message.reply_html(parser_example)
 async def addadmin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_manager: UserManager = context.bot_data['user_manager']
     try:
@@ -168,12 +169,12 @@ async def main_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     if not user_manager.is_user_activated(update.effective_user.id): await update.message.reply_text("Botu kullanmak için /start yazarak başla."); return
     if 'mode' not in context.user_data: await update.message.reply_text("Önce `/puan` komutuyla bir tarama modu seçmen lazım."); return
     if context.user_data.get('mode') == 'single':
-        cards = re.findall(r'\d{16}\|\d{2}|\d{2,4}\|\d{3,4}', update.message.text)
+        cards = re.findall(r'^\d{16}\|\d{2}\|\d{2,4}\|\d{3,4}$', update.message.text)
         if not cards: return
         card = cards[0]; await update.message.reply_text(f"Tekli modda kart taranıyor...")
         site_checker = context.bot_data['puan_checker']
         result = site_checker.check_card(card); log_activity(update.effective_user, card, result)
-        await update.message.reply_html(f"<b>KART:</b> {card}\n<b>SONUÇ:</b> {result}")
+        await update.message.reply_text(f"KART: {card}\nSONUÇ: {result}")
         context.user_data.pop('mode', None)
 async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_manager: UserManager = context.bot_data['user_manager']
@@ -184,11 +185,20 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         file = await context.bot.get_file(update.message.document); file_content_bytes = await file.download_as_bytearray()
         file_content = file_content_bytes.decode('utf-8')
     except Exception as e: await update.message.reply_text(f"Dosyayı okurken bir hata oldu: {e}"); return
-    cards = re.findall(r'\d{16}\|\d{2}|\d{2,4}\|\d{3,4}', file_content)
+    cards = []
+    for line in file_content.splitlines():
+        line = line.strip()
+        if re.match(r'^\d{16}\|\d{2}\|\d{2,4}\|\d{3,4}$', line):
+            cards.append(line)
     if not cards: await update.message.reply_text("Dosyanın içinde geçerli formatta kart bulamadım."); return
-    is_admin = user_manager.is_user_admin(update.effective_user.id); limit = 1000 if is_admin else 120
+    
+    # --- İŞTE DEĞİŞİKLİK BURADA ---
+    is_admin = user_manager.is_user_admin(update.effective_user.id)
+    limit = 5000 if is_admin else 120 # Komutanın limiti 5000'e yükseltildi
+    
     if len(cards) > limit:
-        await update.message.reply_text(f"DUR! Dosyadaki kart sayısı limitini aşıyor. Senin limitin: {limit} kart."); return
+        await update.message.reply_text(f"DUR! Dosyadaki kart sayısı ({len(cards)}) limitini aşıyor. Senin limitin: {limit} kart."); return
+        
     job_data = {'user_id': update.effective_user.id, 'user': update.effective_user, 'cards': cards}
     context.job_queue.run_once(bulk_check_job, 0, data=job_data, name=f"check_{update.effective_user.id}")
     await update.message.reply_text("✅ Emir alındı! Operasyon Çavuşu görevi devraldı...")
@@ -205,7 +215,7 @@ def main():
     if not puan_checker.login(): print("UYARI: PuanChecker'a giriş yapılamadı!")
     else: print("PuanChecker birimi aktif.")
     user_manager_instance = UserManager(initial_admin_id=ADMIN_ID)
-    print("Lordlar Kulübü (v30 - Final) aktif...")
+    print("Lordlar Kulübü (v32 - Ordu Büyütme) aktif...")
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     application.bot_data['puan_checker'] = puan_checker
     application.bot_data['user_manager'] = user_manager_instance
