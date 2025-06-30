@@ -1,5 +1,6 @@
-# --- DOSYA: main.py (v29 - Nagi Cephesi Fethedildi) ---
-# NagiChecker'ın giriş bilgileri, çalınan planlara göre güncellendi.
+# --- DOSYA: main.py (v30 - SADE VE GÜÇLÜ FİNAL SÜRÜMÜ) ---
+# Bütün kafa siken, çalışmayan NagiChecker birimi imha edildi.
+# Sadece taş gibi çalışan /puan komutu kaldı.
 
 import logging, requests, time, os, re, json, io
 from urllib.parse import quote
@@ -26,9 +27,9 @@ except ImportError:
     print("KRİTİK HATA: 'bot_token.py' dosyası bulunamadı!"); exit()
 
 # -----------------------------------------------------------------------------
-# 3. BİRİM: İSTİHBARAT & OPERASYON BİRİMLERİ (GÜNCELLENDİ)
+# 3. BİRİM: İSTİHBARAT & OPERASYON (TEK VE GÜÇLÜ BİRİM)
 # -----------------------------------------------------------------------------
-class KaderChecker:
+class PuanChecker:
     def __init__(self, key):
         self.login_url = "https://kaderchecksystem.xyz/"
         self.key = key
@@ -41,33 +42,7 @@ class KaderChecker:
             response = self.session.post(self.login_url, data={'key': self.key}, timeout=self.timeout)
             return response.ok and "GİRİŞ YAP" not in response.text
         except requests.exceptions.RequestException as e:
-            logging.error(f"KaderChecker giriş hatası: {e}"); return False
-    def check_card(self, card):
-        try:
-            formatted_card = quote(card)
-            full_url = f"{self.target_api_url}?card={formatted_card}"
-            response = self.session.get(full_url, timeout=self.timeout)
-            return response.text.strip()
-        except requests.exceptions.RequestException as e: return f"HATA: {e}"
-
-class NagiChecker:
-    def __init__(self, username, password):
-        self.login_url = "https://nagi.tr/checker/login.php"
-        self.target_api_url = "https://nagi.tr/checker/exxen.php"
-        self.username = username
-        self.password = password
-        self.session = requests.Session()
-        self.session.headers.update({'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"})
-        self.timeout = 25
-    def login(self) -> bool:
-        try:
-            # <<< İŞTE İSTİHBARATA GÖRE YAPILAN DEĞİŞİKLİK BURADA >>>
-            # Formdaki inputların 'name' attribute'ları 'username' ve 'password' imiş.
-            payload = {'username': self.username, 'password': self.password}
-            response = self.session.post(self.login_url, data=payload, timeout=self.timeout)
-            return response.ok and "login.php" not in response.url
-        except requests.exceptions.RequestException as e:
-            logging.error(f"NagiChecker giriş hatası: {e}"); return False
+            logging.error(f"PuanChecker giriş hatası: {e}"); return False
     def check_card(self, card):
         try:
             formatted_card = quote(card)
@@ -77,7 +52,7 @@ class NagiChecker:
         except requests.exceptions.RequestException as e: return f"HATA: {e}"
 
 # -----------------------------------------------------------------------------
-# 4. BİRİM: LORDLAR SİCİL DAİRESİ (User Manager) - Değişiklik yok
+# 4. BİRİM: LORDLAR SİCİL DAİRESİ (User Manager)
 # -----------------------------------------------------------------------------
 class UserManager:
     def __init__(self, initial_admin_id):
@@ -117,7 +92,7 @@ class UserManager:
         return "Geçersiz veya kullanılmış Vezir Fermanı."
 
 # -----------------------------------------------------------------------------
-# 5. BİRİM: EMİR SUBAYLARI (Handlers) - Değişiklik yok
+# 5. BİRİM: EMİR SUBAYLARI (Handlers)
 # -----------------------------------------------------------------------------
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 def log_activity(user: User, card: str, result: str):
@@ -126,10 +101,7 @@ def log_activity(user: User, card: str, result: str):
     with open("terminator_logs.txt", "a", encoding="utf-8") as f: f.write(log_entry)
 async def bulk_check_job(context: ContextTypes.DEFAULT_TYPE):
     job_data = context.job.data; user_id = job_data['user_id']; user = job_data['user']; cards = job_data['cards']
-    active_checker_key = job_data['checker']
-    if active_checker_key == 'kader': site_checker = context.bot_data['kader_checker']
-    elif active_checker_key == 'nagi': site_checker = context.bot_data['nagi_checker']
-    else: return
+    site_checker: PuanChecker = context.bot_data['puan_checker']
     await context.bot.send_message(chat_id=user_id, text=f"Operasyon çavuşu, {len(cards)} kartlık görevi devraldı. Tarama başladı...")
     report_content = "";
     for card in cards:
@@ -140,22 +112,17 @@ async def bulk_check_job(context: ContextTypes.DEFAULT_TYPE):
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_manager: UserManager = context.bot_data['user_manager']
     if user_manager.is_user_activated(update.effective_user.id):
-        await update.message.reply_text("Lordum, emrindeyim!\n`/puan` veya `/exxen` komutlarını kullanabilirsin.")
+        await update.message.reply_text("Lordum, emrindeyim!\nSadece `/puan` komutunu kullanabilirsin.")
     else:
         await update.message.reply_text("Lord Checker'a hoşgeldin,\nherhangi bir sorunun olursa Owner: @tanriymisimben e sorabilirsin.")
         keyboard = [[InlineKeyboardButton("Evet, bir key'im var ✅", callback_data="activate_start"), InlineKeyboardButton("Hayır, bir key'im yok", callback_data="activate_no_key")]]
         await update.message.reply_text("Botu kullanmak için bir key'in var mı?", reply_markup=InlineKeyboardMarkup(keyboard))
-async def checker_selection_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, checker_name: str, checker_display_name: str):
+async def puan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_manager: UserManager = context.bot_data['user_manager']
     if not user_manager.is_user_activated(update.effective_user.id):
         await update.message.reply_text("Bu komutu kullanmak için önce /start yazarak bir anahtar aktive etmelisin."); return
-    context.user_data['active_checker'] = checker_name
     keyboard = [[InlineKeyboardButton("Tekli Kontrol", callback_data="mode_single"), InlineKeyboardButton("Çoklu Kontrol", callback_data="mode_multiple")]]
-    await update.message.reply_text(f"**{checker_display_name}** cephesi seçildi. Tarama modunu seç Lord'um:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
-async def puan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await checker_selection_handler(update, context, checker_name='kader', checker_display_name='PUAN')
-async def exxen_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await checker_selection_handler(update, context, checker_name='nagi', checker_display_name='EXXEN')
+    await update.message.reply_text(f"**PUAN** cephesi seçildi. Tarama modunu seç Lord'um:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
 async def addadmin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_manager: UserManager = context.bot_data['user_manager']
     try:
@@ -195,26 +162,23 @@ async def main_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     user_manager: UserManager = context.bot_data['user_manager']
     if context.user_data.get('awaiting_key', False):
         key = update.message.text.strip(); result = user_manager.activate_user(update.effective_user.id, key)
-        if result == "Success": await update.message.reply_text("✅ Anahtar kabul edildi!\n\nLord ailesine hoşgeldiniz. `/puan` veya `/exxen` komutlarını kullanabilirsiniz.")
+        if result == "Success": await update.message.reply_text("✅ Anahtar kabul edildi!\n\nLord ailesine hoşgeldiniz. `/puan` komutunu kullanabilirsiniz.")
         else: await update.message.reply_text(f"❌ {result}")
         context.user_data['awaiting_key'] = False; return
     if not user_manager.is_user_activated(update.effective_user.id): await update.message.reply_text("Botu kullanmak için /start yazarak başla."); return
-    if 'active_checker' not in context.user_data or 'mode' not in context.user_data: await update.message.reply_text("Önce `/puan` veya `/exxen` gibi bir komutla cephe ve mod seçmelisin."); return
+    if 'mode' not in context.user_data: await update.message.reply_text("Önce `/puan` komutuyla bir tarama modu seçmen lazım."); return
     if context.user_data.get('mode') == 'single':
         cards = re.findall(r'\d{16}\|\d{2}|\d{2,4}\|\d{3,4}', update.message.text)
         if not cards: return
         card = cards[0]; await update.message.reply_text(f"Tekli modda kart taranıyor...")
-        active_checker_key = context.user_data['active_checker']
-        if active_checker_key == 'kader': site_checker = context.bot_data['kader_checker']
-        else: site_checker = context.bot_data['nagi_checker']
+        site_checker = context.bot_data['puan_checker']
         result = site_checker.check_card(card); log_activity(update.effective_user, card, result)
         await update.message.reply_html(f"<b>KART:</b> {card}\n<b>SONUÇ:</b> {result}")
-        context.user_data.pop('mode', None); context.user_data.pop('active_checker', None)
+        context.user_data.pop('mode', None)
 async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_manager: UserManager = context.bot_data['user_manager']
     if not context.user_data.get('awaiting_bulk_file'): return
     if not user_manager.is_user_activated(update.effective_user.id): return
-    if 'active_checker' not in context.user_data: return
     await update.message.reply_text("Dosya alındı, askeri konvoy indiriliyor...")
     try:
         file = await context.bot.get_file(update.message.document); file_content_bytes = await file.download_as_bytearray()
@@ -225,10 +189,10 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_admin = user_manager.is_user_admin(update.effective_user.id); limit = 1000 if is_admin else 120
     if len(cards) > limit:
         await update.message.reply_text(f"DUR! Dosyadaki kart sayısı limitini aşıyor. Senin limitin: {limit} kart."); return
-    job_data = {'user_id': update.effective_user.id, 'user': update.effective_user, 'cards': cards, 'checker': context.user_data['active_checker']}
+    job_data = {'user_id': update.effective_user.id, 'user': update.effective_user, 'cards': cards}
     context.job_queue.run_once(bulk_check_job, 0, data=job_data, name=f"check_{update.effective_user.id}")
     await update.message.reply_text("✅ Emir alındı! Operasyon Çavuşu görevi devraldı...")
-    context.user_data.pop('awaiting_bulk_file', None); context.user_data.pop('mode', None); context.user_data.pop('active_checker', None)
+    context.user_data.pop('awaiting_bulk_file', None); context.user_data.pop('mode', None)
 
 # -----------------------------------------------------------------------------
 # 6. BİRİM: ANA KOMUTA MERKEZİ (main)
@@ -237,21 +201,16 @@ def main():
     if not TELEGRAM_TOKEN or "BURAYA" in TELEGRAM_TOKEN or not ADMIN_ID:
         print("KRİTİK HATA: 'bot_token.py' dosyasını doldurmadın!"); return
     keep_alive()
-    kader_checker = KaderChecker(key="47ca070e376270fff5f5ad3b75487b80")
-    nagi_checker = NagiChecker(username="semaviturkoglu", password="0545Semavi@")
-    if not kader_checker.login(): print("UYARI: KaderChecker'a giriş yapılamadı!")
-    else: print("KaderChecker birimi aktif.")
-    if not nagi_checker.login(): print("UYARI: NagiChecker'a giriş yapılamadı!")
-    else: print("NagiChecker birimi aktif.")
+    puan_checker = PuanChecker(key="47ca070e376270fff5f5ad3b75487b80")
+    if not puan_checker.login(): print("UYARI: PuanChecker'a giriş yapılamadı!")
+    else: print("PuanChecker birimi aktif.")
     user_manager_instance = UserManager(initial_admin_id=ADMIN_ID)
-    print("Lordlar Kulübü (v29 - Nagi Fatihi) aktif...")
+    print("Lordlar Kulübü (v30 - Final) aktif...")
     application = Application.builder().token(TELEGRAM_TOKEN).build()
-    application.bot_data['kader_checker'] = kader_checker
-    application.bot_data['nagi_checker'] = nagi_checker
+    application.bot_data['puan_checker'] = puan_checker
     application.bot_data['user_manager'] = user_manager_instance
-    application.add_handler(CommandHandler(["check", "puan"], puan_command))
-    application.add_handler(CommandHandler("exxen", exxen_command))
     application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler(["check", "puan"], puan_command))
     application.add_handler(CommandHandler("addadmin", addadmin_command))
     application.add_handler(CommandHandler("logs", logs_command))
     application.add_handler(CommandHandler("duyuru", duyuru_command))
