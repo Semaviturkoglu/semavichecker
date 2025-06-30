@@ -1,5 +1,5 @@
-# --- DOSYA: main.py (v26 - NİHAİ SÜRÜM) ---
-# İSİM GİZLEME SİSTEMİ KALDIRILDI. API'DEN NE GELİRSE O. EN STABİL HALİ.
+# --- DOSYA: main.py (v27 - HTML Temizleyici) ---
+# API'den gelen HTML kodlarını temizleme özelliği eklendi.
 
 import logging, requests, time, os, re, json, io
 from urllib.parse import quote
@@ -26,8 +26,13 @@ except ImportError:
     print("KRİTİK HATA: 'bot_token.py' dosyası bulunamadı!"); exit()
 
 # -----------------------------------------------------------------------------
-# 3. BİRİM: İSTİHBARAT & OPERASYON BİRİMLERİ
+# 3. BİRİM: İSTİHBARAT & OPERASYON BİRİMLERİ (GÜNCELLENDİ)
 # -----------------------------------------------------------------------------
+
+def clean_html(raw_html):
+    """Gelen cevaptaki HTML etiketlerini siken fonksiyon."""
+    clean_text = re.sub(r'<[^>]+>', '', raw_html)
+    return ' '.join(clean_text.split())
 
 class KaderChecker:
     def __init__(self, key):
@@ -48,8 +53,8 @@ class KaderChecker:
             formatted_card = quote(card)
             full_url = f"{self.target_api_url}?card={formatted_card}"
             response = self.session.get(full_url, timeout=self.timeout)
-            # *** DEĞİŞİKLİK BURADA: ARTIK KESME BİÇME YOK, NE GELİRSE O ***
-            return response.text.strip()
+            # GELEN CEVABI ÖNCE BİR TEMİZLİKTEN GEÇİRİYORUZ
+            return clean_html(response.text.strip())
         except requests.exceptions.RequestException as e: return f"HATA: {e}"
 
 class NagiChecker:
@@ -73,13 +78,15 @@ class NagiChecker:
             formatted_card = quote(card)
             full_url = f"{self.target_api_url}?card={formatted_card}"
             response = self.session.get(full_url, timeout=self.timeout)
-            return response.text.strip()
+            # GELEN CEVABI ÖNCE BİR TEMİZLİKTEN GEÇİRİYORUZ
+            return clean_html(response.text.strip())
         except requests.exceptions.RequestException as e: return f"HATA: {e}"
 
 # -----------------------------------------------------------------------------
 # 4. BİRİM: LORDLAR SİCİL DAİRESİ (User Manager) - Değişiklik yok
 # -----------------------------------------------------------------------------
 class UserManager:
+    # ... (Bu class'ın tamamı öncekiyle aynı, değişiklik yok)
     def __init__(self, initial_admin_id):
         self.keys_file = "keys.txt"; self.activated_users_file = "activated_users.json"
         self.admin_keys_file = "admin_keys.txt"; self.activated_admins_file = "activated_admins.json"
@@ -210,7 +217,8 @@ async def main_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         if active_checker_key == 'kader': site_checker = context.bot_data['kader_checker']
         else: site_checker = context.bot_data['nagi_checker']
         result = site_checker.check_card(card); log_activity(update.effective_user, card, result)
-        await update.message.reply_html(f"<b>KART:</b> {card}\n<b>SONUÇ:</b> {result}")
+        # TEKLİ SONUÇTA DA HTML'İ SİKER, DÜZ METİN YOLLARIZ. GARANTİ OLSUN.
+        await update.message.text(f"KART: {card}\nSONUÇ: {result}")
         context.user_data.pop('mode', None); context.user_data.pop('active_checker', None)
 async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_manager: UserManager = context.bot_data['user_manager']
@@ -246,7 +254,7 @@ def main():
     if not nagi_checker.login(): print("UYARI: NagiChecker'a giriş yapılamadı!")
     else: print("NagiChecker birimi aktif.")
     user_manager_instance = UserManager(initial_admin_id=ADMIN_ID)
-    print("Lordlar Kulübü (v25) aktif...")
+    print("Lordlar Kulübü (v27 - HTML Temizleyici) aktif...")
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     application.bot_data['kader_checker'] = kader_checker
     application.bot_data['nagi_checker'] = nagi_checker
