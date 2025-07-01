@@ -1,5 +1,5 @@
-# --- DOSYA: main.py (v36 - Puan Botu Final / Ayıklama Sistemi) ---
-# Sadece /puan komutu var ve /ayikla komutu eklendi.
+# --- DOSYA: main.py (NİHAİ SÜRÜM v35 - HER ŞEY DAHİL) ---
+# Bütün komutlar, sistemler ve Canlı Telsiz özelliği burada.
 
 import logging, requests, time, os, re, json, io
 from urllib.parse import quote
@@ -12,14 +12,14 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from telegram.constants import ParseMode
 from telegram.error import Forbidden, BadRequest
 
-# --- BÖLÜM 1: NÖBETÇİ KULÜBESİ ---
+# --- BÖLÜM 1: NÖBETÇİ KULÜBESİ (7/24 İÇİN) ---
 app = Flask('')
 @app.route('/')
-def home(): return "Puan Lord Bot Karargahı ayakta."
+def home(): return "Lord Checker Karargahı ayakta."
 def run_flask(): app.run(host='0.0.0.0',port=8080)
 def keep_alive(): Thread(target=run_flask).start()
 
-# --- BÖLÜM 2: GİZLİ BİLGİLER ---
+# --- BÖLÜM 2: GİZLİ BİLGİLER (bot_token.py'den) ---
 try:
     from bot_token import TELEGRAM_TOKEN, ADMIN_ID
 except ImportError:
@@ -92,26 +92,55 @@ class UserManager:
 # 5. BİRİM: EMİR SUBAYLARI (Handlers)
 # -----------------------------------------------------------------------------
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+
 def log_activity(user: User, card: str, result: str):
     masked_card = re.sub(r'(\d{6})\d{6}(\d{4})', r'\1******\2', card.split('|')[0]) + '|' + '|'.join(card.split('|')[1:])
     log_entry = f"[{datetime.now():%Y-%m-%d %H:%M:%S}] - KULLANICI: @{user.username} (ID: {user.id}) - KART: {masked_card} - SONUÇ: {result}\n"
     with open("terminator_logs.txt", "a", encoding="utf-8") as f: f.write(log_entry)
 
 async def bulk_check_job(context: ContextTypes.DEFAULT_TYPE):
-    job_data = context.job.data; user_id = job_data['user_id']; user = job_data['user']; cards = job_data['cards']
+    """Arka planda çalışan ve toplu check işlemini yapan görev (Canlı Telsizli)."""
+    job_data = context.job.data
+    user_id = job_data['user_id']; user = job_data['user']
+    cards = job_data['cards']; progress_message_id = job_data['progress_message_id']
+    total_cards = len(cards)
+    
     site_checker: PuanChecker = context.bot_data['puan_checker']
-    await context.bot.send_message(chat_id=user_id, text=f"Operasyon çavuşu, {len(cards)} kartlık görevi devraldı. Tarama başladı...")
-    report_content = "";
-    for card in cards:
-        result = site_checker.check_card(card); log_activity(user, card, result)
-        report_content += f"KART: {card}\nSONUÇ: {result}\n\n"; time.sleep(0.5)
+    report_content = ""
+    last_update_time = time.time()
+    
+    try:
+        for i, card in enumerate(cards):
+            result = site_checker.check_card(card)
+            log_activity(user, card, result)
+            report_content += f"KART: {card}\nSONUÇ: {result}\n\n"
+            
+            current_time = time.time()
+            if (i + 1) % 10 == 0 or current_time - last_update_time > 3:
+                progress = i + 1
+                progress_percent = int((progress / total_cards) * 10)
+                progress_bar = '█' * progress_percent + '─' * (10 - progress_percent)
+                progress_text = f"<code>[{progress_bar}]</code>\n\n<b>Taranıyor:</b> {progress} / {total_cards}"
+                try:
+                    await context.bot.edit_message_text(text=progress_text, chat_id=user_id, message_id=progress_message_id, parse_mode=ParseMode.HTML)
+                    last_update_time = current_time
+                except BadRequest as e:
+                    if "Message is not modified" not in str(e): logging.warning(f"Durum raporu güncellenemedi: {e}")
+            
+            time.sleep(0.5)
+
+    except Exception as e:
+        logging.error(f"Toplu check sırasında hata: {e}")
+        await context.bot.send_message(chat_id=user_id, text=f"❌ Komutanım, operasyon sırasında bir hata oluştu: {e}"); return
+
+    await context.bot.edit_message_text(text=f"✅ Tarama bitti! Rapor hazırlanıp yollanıyor...", chat_id=user_id, message_id=progress_message_id)
     report_file = io.BytesIO(report_content.encode('utf-8'))
-    await context.bot.send_document(chat_id=user_id, document=report_file, filename="sonuclar.txt", caption="Raporun hazır.")
+    await context.bot.send_document(chat_id=user_id, document=report_file, filename="sonuclar.txt", caption=f"Operasyon tamamlandı. {total_cards} kartlık raporun ektedir.")
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_manager: UserManager = context.bot_data['user_manager']
     if user_manager.is_user_activated(update.effective_user.id):
-        await update.message.reply_text("Lordum, emrindeyim!\nSadece `/puan` komutunu kullanabilirsin.\nSonuçları ayıklamak için `/ayikla` komutunu kullan.")
+        await update.message.reply_text("Lordum, emrindeyim!\n`/puan` komutuyla kart checkleyebilir,\n`/ayikla` komutuyla sonuçları ayıklayabilirsin.")
     else:
         await update.message.reply_text("Lord Checker'a hoşgeldin,\nherhangi bir sorunun olursa Owner: @tanriymisimben e sorabilirsin.")
         keyboard = [[InlineKeyboardButton("Evet, bir key'im var ✅", callback_data="activate_start"), InlineKeyboardButton("Hayır, bir key'im yok", callback_data="activate_no_key")]]
@@ -123,6 +152,8 @@ async def puan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Bu komutu kullanmak için önce /start yazarak bir anahtar aktive etmelisin."); return
     keyboard = [[InlineKeyboardButton("Tekli Kontrol", callback_data="mode_single"), InlineKeyboardButton("Çoklu Kontrol", callback_data="mode_multiple")]]
     await update.message.reply_text(f"**PUAN** cephesi seçildi. Tarama modunu seç Lord'um:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
+    parser_example = ("Toplu kontrol yaparken `.txt` dosyanızı aşağıdaki gibi hazırlayınız:\n\n<pre>5522898050712020|02|28|000\n5522898050712020|02|28|000</pre>")
+    await update.message.reply_html(parser_example)
 
 async def ayikla_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_manager: UserManager = context.bot_data['user_manager']
@@ -161,14 +192,18 @@ async def duyuru_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ Ferman operasyonu tamamlandı!\nBaşarıyla gönderildi: {success}\nBaşarısız: {fail}")
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query; await query.answer(); action = query.data
-    if action == "activate_start": context.user_data['awaiting_key'] = True; await query.edit_message_text(text="🔑 Lütfen sana verilen anahtarı şimdi gönder.")
-    elif action == "activate_no_key": await query.edit_message_text(text="Key almak için @tanriymisimben e başvurabilirsin.")
+    query = update.callback_query; await query.answer(); action = query.data; new_text = None
+    if action == "activate_start": context.user_data['awaiting_key'] = True; new_text = "🔑 Lütfen sana verilen anahtarı şimdi gönder."
+    elif action == "activate_no_key": new_text = "Key almak için @tanriymisimben e başvurabilirsin."
     elif action.startswith("mode_"):
         mode = action.split('_')[1]; context.user_data['mode'] = mode
-        if mode == 'single': await query.edit_message_text(text="✅ **Tekli Mod** seçildi.\nŞimdi bir adet kart yolla.")
+        if mode == 'single': new_text = "✅ **Tekli Mod** seçildi.\nŞimdi bir adet kart yolla."
         elif mode == 'multiple':
-            context.user_data['awaiting_bulk_file'] = True; await query.edit_message_text(text="✅ **Çoklu Mod** seçildi.\nŞimdi içinde kartların olduğu `.txt` dosyasını gönder.")
+            context.user_data['awaiting_bulk_file'] = True; new_text = "✅ **Çoklu Mod** seçildi.\nŞimdi içinde kartların olduğu `.txt` dosyasını gönder."
+    if new_text:
+        try: await query.edit_message_text(text=new_text, parse_mode=ParseMode.MARKDOWN)
+        except BadRequest as e:
+            if "Message is not modified" not in str(e): logging.warning(f"Button callback hatası: {e}")
 
 async def main_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_manager: UserManager = context.bot_data['user_manager']
@@ -187,59 +222,50 @@ async def main_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         result = site_checker.check_card(card); log_activity(update.effective_user, card, result)
         await update.message.reply_html(f"<b>KART:</b> {card}\n<b>SONUÇ:</b> {result}")
         context.user_data.pop('mode', None)
+    elif context.user_data.get('awaiting_bulk_file'):
+        await update.message.reply_text("Kardeşim laf değil, dosya atman lazım. İçinde kartlar olan bir `.txt` dosyası.")
 
 async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Gelen dosyaları işler. Ya toplu check içindir ya da ayıklama içindir."""
     user_manager: UserManager = context.bot_data['user_manager']
     if not user_manager.is_user_activated(update.effective_user.id): return
-    
-    # --- GÖREV 1: GANİMET AYIKLAMA ---
+    # --- AYIKLAMA İŞLEMİ ---
     if context.user_data.get('awaiting_sort_file'):
         await update.message.reply_text("Sonuç dosyası alındı, ayıklanıyor...")
         try:
             file = await context.bot.get_file(update.message.document); file_content_bytes = await file.download_as_bytearray()
             file_content = file_content_bytes.decode('utf-8')
         except Exception as e: await update.message.reply_text(f"Dosyayı okurken bir hata oldu: {e}"); return
-        
-        approved_kartlar_text = ""
-        lines = file_content.splitlines()
-        mevcut_kart = ""
-        for line in lines:
-            if line.strip().startswith("KART:"):
-                mevcut_kart = line.strip()
+        approved_kartlar_text = ""; mevcut_kart = ""
+        for line in file_content.splitlines():
+            if line.strip().startswith("KART:"): mevcut_kart = line.strip()
             elif line.strip().startswith("SONUÇ:") and ("Approved" in line or "✅" in line):
                 if mevcut_kart:
-                    # KART satırını ve SONUÇ satırını birleştir
-                    full_entry = f"{mevcut_kart}\n{line.strip()}\n\n"
-                    approved_kartlar_text += full_entry
-                    mevcut_kart = ""
-            elif not line.strip():
-                mevcut_kart = ""
-        
+                    full_entry = f"{mevcut_kart}\n{line.strip()}\n\n"; approved_kartlar_text += full_entry; mevcut_kart = ""
+            elif not line.strip(): mevcut_kart = ""
         context.user_data.pop('awaiting_sort_file', None)
         if not approved_kartlar_text:
             await update.message.reply_text("ℹ️ Yolladığın dosyada 'Approved' sonuçlu kart bulunamadı."); return
         report_file = io.BytesIO(approved_kartlar_text.encode('utf-8'))
-        await context.bot.send_document(chat_id=update.effective_user.id, document=report_file, filename="approved_sonuclar.txt", caption="İşte ayıklanmış canlı kartların listesi.")
-        return
-
-    # --- GÖREV 2: TOPLU CHECK ---
+        await context.bot.send_document(chat_id=update.effective_user.id, document=report_file, filename="approved_sonuclar.txt", caption="İşte ayıklanmış canlı kartların listesi."); return
+    
+    # --- TOPLU CHECK İŞLEMİ ---
     if context.user_data.get('awaiting_bulk_file'):
-        await update.message.reply_text("Dosya alındı, askeri konvoy indiriliyor...")
+        progress_message = await update.message.reply_text("Dosya alındı... Hedefler kilitleniyor...")
         try:
             file = await context.bot.get_file(update.message.document); file_content_bytes = await file.download_as_bytearray()
             file_content = file_content_bytes.decode('utf-8')
-        except Exception as e: await update.message.reply_text(f"Dosyayı okurken bir hata oldu: {e}"); return
+        except Exception as e: await progress_message.edit_text(f"Dosyayı okurken bir hata oldu: {e}"); return
         cards = [];
         for line in file_content.splitlines():
             if re.match(r'^\d{16}\|\d{2}\|\d{2,4}\|\d{3,4}$', line.strip()): cards.append(line.strip())
-        if not cards: await update.message.reply_text("Dosyanın içinde geçerli formatta kart bulamadım."); return
+        if not cards: await progress_message.edit_text("Dosyanın içinde geçerli formatta kart bulamadım."); return
         is_admin = user_manager.is_user_admin(update.effective_user.id); limit = 5000 if is_admin else 120
         if len(cards) > limit:
-            await update.message.reply_text(f"DUR! Dosyadaki kart sayısı ({len(cards)}) limitini aşıyor. Senin limitin: {limit} kart."); return
-        job_data = {'user_id': update.effective_user.id, 'user': update.effective_user, 'cards': cards}
-        context.job_queue.run_once(bulk_check_job, 0, data=job_data, name=f"check_{update.effective_user.id}")
-        await update.message.reply_text("✅ Emir alındı! Operasyon Çavuşu görevi devraldı...")
+            await progress_message.edit_text(f"DUR! Dosyadaki kart sayısı ({len(cards)}) limitini aşıyor. Senin limitin: {limit} kart."); return
+        
+        job_data = {'user_id': update.effective_user.id, 'user': update.effective_user, 'cards': cards, 'progress_message_id': progress_message.message_id}
+        context.job_queue.run_once(bulk_check_job, 1, data=job_data, name=f"check_{update.effective_user.id}")
+        await progress_message.edit_text("✅ Emir alındı! Operasyon Çavuşu görevi devraldı. Canlı telsiz bağlantısı kuruldu.")
         context.user_data.pop('awaiting_bulk_file', None); context.user_data.pop('mode', None)
 
 # -----------------------------------------------------------------------------
@@ -253,19 +279,18 @@ def main():
     if not puan_checker.login(): print("UYARI: PuanChecker'a giriş yapılamadı!")
     else: print("PuanChecker birimi aktif.")
     user_manager_instance = UserManager(initial_admin_id=ADMIN_ID)
-    print("Lordlar Kulübü (v35 - Ganimet Tasnif) aktif...")
+    print("Lordlar Kulübü (FİNAL) aktif...")
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     application.bot_data['puan_checker'] = puan_checker
     application.bot_data['user_manager'] = user_manager_instance
     
-    # Komutları ekle
+    # Bütün komut ve handler'lar
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler(["check", "puan"], puan_command))
-    application.add_handler(CommandHandler("ayikla", ayikla_command)) # YENİ KOMUT
+    application.add_handler(CommandHandler("ayikla", ayikla_command))
     application.add_handler(CommandHandler("addadmin", addadmin_command))
     application.add_handler(CommandHandler("logs", logs_command))
     application.add_handler(CommandHandler("duyuru", duyuru_command))
-    
     application.add_handler(CallbackQueryHandler(button_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, main_message_handler))
     application.add_handler(MessageHandler(filters.Document.TXT, document_handler))
