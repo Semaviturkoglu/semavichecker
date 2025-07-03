@@ -1,5 +1,5 @@
-# --- DOSYA: main.py (v49 - SADECE IYZICO / TÖVBE SÜRÜMÜ) ---
-# Bütün diğer checker'lar imha edildi. Sadece Iyzico ve Proxy sistemi devrede.
+# --- DOSYA: main.py (v50 - NİHAİ TÖVBE / SADECE IYZICO - PROXYSİZ) ---
+# BÜTÜN DİĞER CHECKER'LAR VE PROXY SİSTEMİ İMHA EDİLDİ. BU SON KOD.
 
 import logging, requests, time, os, re, json, io, random, base64, hashlib
 from urllib.parse import quote
@@ -26,27 +26,18 @@ except ImportError:
     print("KRİTİK HATA: 'bot_token.py' dosyası bulunamadı!"); exit()
 
 # -----------------------------------------------------------------------------
-# 3. BİRİM: İSTİHBARAT & OPERASYON (Iyzico Özel Harekat)
+# 3. BİRİM: İSTİHBARAT & OPERASYON (Iyzico Özel Harekat - PROXYSİZ)
 # -----------------------------------------------------------------------------
 class IyzicoChecker:
     def __init__(self):
-        # iyzico.php dosyasından çalınan istihbarat
         self.api_key = "sandbox-qR6MhabI0tS0142r1g4A4SA0j2o121l5"
         self.secret_key = "sandbox-d961f6d354674a2754668b5a034293f7"
         self.base_url = "https://sandbox-api.iyzipay.com"
         self.session = requests.Session()
         self.timeout = 30
-        self.proxies = self._load_proxies("proxies.txt")
-
-    def _load_proxies(self, filename):
-        if not os.path.exists(filename):
-            logging.warning("UYARI: 'proxies.txt' dosyası bulunamadı! Proxysiz çalışılacak.")
-            return []
-        with open(filename, "r") as f:
-            return [line.strip() for line in f if line.strip() and ":" in line]
 
     def _get_auth_header(self, body_str):
-        random_str = str(time.time())
+        random_str = str(int(time.time() * 1000))
         hash_str = self.api_key + random_str + self.secret_key + body_str
         pki = base64.b64encode(hashlib.sha1(hash_str.encode()).digest()).decode()
         return {
@@ -62,24 +53,23 @@ class IyzicoChecker:
             if len(parts) < 4: return "❌ HATA: Eksik kart bilgisi. Format: NUMARA|AY|YIL|CVC"
             ccn, month, year, cvc = parts[0], parts[1], "20"+parts[2] if len(parts[2]) == 2 else parts[2], parts[3]
             
-            proxy = random.choice(self.proxies) if self.proxies else None
-            proxy_dict = {"http": f"http://{proxy}", "https": f"https://{proxy}"} if proxy else None
+            # Rastgele IP ve kullanıcı bilgisi oluştur
+            random_ip = f"{random.randint(1,255)}.{random.randint(1,255)}.{random.randint(1,255)}.{random.randint(1,255)}"
             
             payload = {
                 "locale": "tr", "conversationId": str(random.randint(111111111, 999999999)),
                 "price": "1.0", "paidPrice": "1.0", "currency": "TRY", "installment": 1,
                 "paymentGroup": "PRODUCT",
                 "paymentCard": { "cardHolderName": "John Doe", "cardNumber": ccn, "expireYear": year, "expireMonth": month, "cvc": cvc, "registerCard": 0 },
-                "buyer": { "id": "BY789", "name": "John", "surname": "Doe", "email": f"j.doe{random.randint(100,999)}@example.com", "identityNumber": "74300864791", "registrationAddress": "Nidakule Göztepe", "ip": "85.34.78.112", "city": "Istanbul", "country": "Turkey" }
+                "buyer": { "id": "BY789", "name": "John", "surname": "Doe", "email": f"j.doe{random.randint(100,999)}@example.com", "identityNumber": "74300864791", "registrationAddress": "Nidakule Göztepe", "ip": random_ip, "city": "Istanbul", "country": "Turkey" }
             }
             body_str = json.dumps(payload, separators=(',', ':'))
             
             response = self.session.post(
-                f"{self.base_url}/payment/3dsecure/initialize",
+                f"{self.base_url}/payment/auth", # 3D Secure olmayan direkt ödeme denemesi
                 data=body_str,
                 headers=self._get_auth_header(body_str),
-                timeout=self.timeout,
-                proxies=proxy_dict
+                timeout=self.timeout
             )
             data = response.json()
 
@@ -87,8 +77,6 @@ class IyzicoChecker:
                 return f"✅ Approved - {data.get('paymentStatus', 'Ödeme Başarılı')}"
             else:
                 return f"❌ Declined - {data.get('errorMessage', 'Bilinmeyen Iyzico Hatası')}"
-        except requests.exceptions.ProxyError:
-            return f"HATA: Proxy'ye bağlanılamadı ({proxy})"
         except Exception as e:
             return f"❌ KRİTİK HATA (Iyzico): {e}"
 
@@ -97,33 +85,35 @@ class IyzicoChecker:
 # -----------------------------------------------------------------------------
 class UserManager:
     def __init__(self, initial_admin_id):
-        self.keys_file="keys.txt";self.activated_users_file="activated_users.json";self.admin_keys_file="admin_keys.txt";self.activated_admins_file="activated_admins.json"
-        self.unused_keys=self._load_from_file(self.keys_file);self.activated_users=self._load_from_json(self.activated_users_file)
-        self.unused_admin_keys=self._load_from_file(self.admin_keys_file);self.activated_admins=self._load_from_json(self.activated_admins_file)
-        if not self.activated_admins and initial_admin_id!=0:self.activated_admins[str(initial_admin_id)]="founding_father";logging.info(f"Kurucu Komutan (ID: {initial_admin_id}) admin olarak atandı.");self._save_all_data()
-    def _load_from_file(self,f):
-        if not os.path.exists(f):return set()
-        with open(f,"r")as file:return{l.strip()for l in file if l.strip()}
-    def _load_from_json(self,f):
-        if not os.path.exists(f):return{}
-        with open(f,"r",encoding="utf-8")as file:
-            try:return json.load(file)
-            except json.JSONDecodeError:return{}
+        self.keys_file="keys.txt"; self.activated_users_file="activated_users.json"
+        self.admin_keys_file="admin_keys.txt"; self.activated_admins_file="activated_admins.json"
+        self.unused_keys=self._load_from_file(self.keys_file); self.activated_users=self._load_from_json(self.activated_users_file)
+        self.unused_admin_keys=self._load_from_file(self.admin_keys_file); self.activated_admins=self._load_from_json(self.activated_admins_file)
+        if not self.activated_admins and initial_admin_id!=0:
+             self.activated_admins[str(initial_admin_id)]="founding_father"; logging.info(f"Kurucu Komutan (ID: {initial_admin_id}) admin olarak atandı."); self._save_all_data()
+    def _load_from_file(self, f):
+        if not os.path.exists(f): return set()
+        with open(f,"r") as file: return {l.strip() for l in file if l.strip()}
+    def _load_from_json(self, f):
+        if not os.path.exists(f): return {}
+        with open(f,"r",encoding="utf-8") as file:
+            try: return json.load(file)
+            except json.JSONDecodeError: return {}
     def _save_all_data(self):
-        with open(self.keys_file,"w")as f:f.write("\n".join(self.unused_keys))
-        with open(self.activated_users_file,"w")as f:json.dump(self.activated_users,f,indent=4)
-        with open(self.admin_keys_file,"w")as f:f.write("\n".join(self.unused_admin_keys))
-        with open(self.activated_admins_file,"w")as f:json.dump(self.activated_admins,f,indent=4)
-    def is_user_activated(self,uid):return str(uid)in self.activated_users or self.is_user_admin(uid)
-    def is_user_admin(self,uid):return str(uid)in self.activated_admins
+        with open(self.keys_file,"w") as f: f.write("\n".join(self.unused_keys))
+        with open(self.activated_users_file,"w") as f: json.dump(self.activated_users,f,indent=4)
+        with open(self.admin_keys_file,"w") as f: f.write("\n".join(self.unused_admin_keys))
+        with open(self.activated_admins_file,"w") as f: json.dump(self.activated_admins,f,indent=4)
+    def is_user_activated(self,uid): return str(uid) in self.activated_users or self.is_user_admin(uid)
+    def is_user_admin(self,uid): return str(uid) in self.activated_admins
     def activate_user(self,uid,key):
-        if self.is_user_activated(str(uid)):return"Zaten bir Lord'sun."
-        if key in self.unused_keys:self.activated_users[str(uid)]=key;self.unused_keys.remove(key);self._save_all_data();return"Success"
-        return"Geçersiz veya kullanılmış anahtar."
+        if self.is_user_activated(str(uid)): return "Zaten bir Lord'sun."
+        if key in self.unused_keys: self.activated_users[str(uid)]=key; self.unused_keys.remove(key); self._save_all_data(); return "Success"
+        return "Geçersiz veya kullanılmış anahtar."
     def activate_admin(self,uid,key):
-        if self.is_user_admin(str(uid)):return"Zaten Komuta Kademesindesin."
-        if key in self.unused_admin_keys:self.activated_admins[str(uid)]=key;self.unused_admin_keys.remove(key);self._save_all_data();return"Success"
-        return"Geçersiz veya kullanılmış Vezir Fermanı."
+        if self.is_user_admin(str(uid)): return "Zaten Komuta Kademesindesin."
+        if key in self.unused_admin_keys: self.activated_admins[str(uid)]=key; self.unused_admin_keys.remove(key); self._save_all_data(); return "Success"
+        return "Geçersiz veya kullanılmış Vezir Fermanı."
 
 # -----------------------------------------------------------------------------
 # 5. BİRİM: EMİR SUBAYLARI (Handlers)
@@ -155,7 +145,7 @@ async def bulk_check_job(c:ContextTypes.DEFAULT_TYPE):
     await c.bot.send_document(chat_id=uid,document=rf,filename="sonuclar.txt",caption=f"{tc} kartlık raporun hazır.")
 async def start_command(u:Update,c:ContextTypes.DEFAULT_TYPE):
     um:UserManager=c.bot_data['user_manager']
-    if um.is_user_activated(u.effective_user.id):await u.message.reply_text("Lordum, emrindeyim!\n`/iyzico` komutuyla kart checkleyebilir,\n`/ayikla` komutuyla sonuçları ayıklayabilirsin.")
+    if um.is_user_activated(u.effective_user.id):await u.message.reply_text("Lordum, Iyzico Özel Harekatı emrinde!\n`/iyzico` komutuyla kart checkleyebilir,\n`/ayikla` komutuyla sonuçları ayıklayabilirsin.")
     else:
         await u.message.reply_text("Iyzico Lord Checker'a hoşgeldin,\nSahip: @tanriymisimben")
         kb=[[InlineKeyboardButton("Evet, bir key'im var ✅",callback_data="activate_start"),InlineKeyboardButton("Hayır, bir key'im yok",callback_data="activate_no_key")]]
@@ -163,6 +153,7 @@ async def start_command(u:Update,c:ContextTypes.DEFAULT_TYPE):
 async def iyzico_command(u:Update,c:ContextTypes.DEFAULT_TYPE):
     um:UserManager=c.bot_data['user_manager']
     if not um.is_user_activated(u.effective_user.id):await u.message.reply_text("Önce /start ile anahtar aktive etmelisin.");return
+    c.user_data['checker_info']={'type':'iyzico','method':'check_card'}
     kb=[[InlineKeyboardButton("Tekli Kontrol",callback_data="mode_single"),InlineKeyboardButton("Çoklu Kontrol",callback_data="mode_multiple")]]
     await u.message.reply_text(f"**IYZICO** cephesi seçildi. Modu seç:",reply_markup=InlineKeyboardMarkup(kb),parse_mode=ParseMode.MARKDOWN)
 async def ayikla_command(u:Update,c:ContextTypes.DEFAULT_TYPE):
@@ -212,13 +203,14 @@ async def main_message_handler(u:Update,c:ContextTypes.DEFAULT_TYPE):
         else:await u.message.reply_text(f"❌ {rs}")
         c.user_data['awaiting_key']=False;return
     if not um.is_user_activated(u.effective_user.id):await u.message.reply_text("Botu kullanmak için /start yazarak başla.");return
+    if'mode'not in c.user_data or'checker_info'not in c.user_data:await u.message.reply_text("Önce `/iyzico` komutuyla bir tarama modu seçmen lazım.");return
     if c.user_data.get('mode')=='single':
         cs=re.findall(r'^\d{16}\|\d{2}\|\d{2,4}\|\d{3,4}$',u.message.text)
         if not cs:return
         card=cs[0];await u.message.reply_text(f"Tekli modda kart taranıyor...")
         sc:IyzicoChecker=c.bot_data['iyzico_checker'];rs=sc.check_card(card);log_activity(u.effective_user,card,rs)
         await u.message.reply_text(f"KART: {card}\nSONUÇ: {rs}")
-        c.user_data.pop('mode',None)
+        c.user_data.pop('mode',None);c.user_data.pop('checker_info',None)
 async def document_handler(u:Update,c:ContextTypes.DEFAULT_TYPE):
     um:UserManager=c.bot_data['user_manager']
     if not um.is_user_activated(u.effective_user.id):return
@@ -252,17 +244,17 @@ async def document_handler(u:Update,c:ContextTypes.DEFAULT_TYPE):
         jd={'user_id':u.effective_user.id,'user':u.effective_user,'cards':cs,'progress_message_id':pm.message_id}
         c.job_queue.run_once(bulk_check_job,1,data=jd,name=f"check_{u.effective_user.id}")
         await pm.edit_text("✅ Emir alındı! Operasyon Çavuşu görevi devraldı.")
-        c.user_data.pop('awaiting_bulk_file',None);c.user_data.pop('mode',None)
+        c.user_data.pop('awaiting_bulk_file',None);c.user_data.pop('mode',None);c.user_data.pop('checker_info',None)
 
 # -----------------------------------------------------------------------------
 # 6. BİRİM: ANA KOMUTA MERKEZİ (main)
 # -----------------------------------------------------------------------------
 def main():
-    if not TELEGRAM_TOKEN or"BURAYA"in TELEGRAM_TOKEN or not ADMIN_ID:print("KRİTİK HATA: 'bot_token.py' dosyasını doldurmadın!");return
+    if not TELEGRAM_TOKEN or"BURAYA"in TELEGRAM_TOKEN or not ADMIN_ID:print("KRİTİK HATA: 'bot_token.py' dosyası eksik!");return
     keep_alive()
     iyzico_checker=IyzicoChecker()
     user_manager_instance=UserManager(initial_admin_id=ADMIN_ID)
-    print("Iyzico Lord Bot (Nihai Sürüm) aktif...")
+    print("Iyzico Lord Bot (NİHAİ) aktif...")
     app=Application.builder().token(TELEGRAM_TOKEN).build()
     app.bot_data['iyzico_checker']=iyzico_checker;app.bot_data['user_manager']=user_manager_instance
     app.add_handler(CommandHandler("start",start_command))
