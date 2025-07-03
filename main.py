@@ -1,5 +1,6 @@
-# --- DOSYA: main.py (v40 - NİHAİ TÖVBE SÜRÜMÜ) ---
-# Bütün hatalar düzeltildi. Login mantığı ve komutlar tamir edildi. Bu son kod.
+# --- DOSYA: main.py (v42 - NİHAİ TÖVBE / SADECE APISERVISIM) ---
+# BÜTÜN DİĞER CHECKER'LAR İMHA EDİLDİ. SADECE apiservisim.store KULLANILIYOR.
+# BÜTÜN HATALAR DÜZELTİLDİ. BU SON KOD.
 
 import logging, requests, time, os, re, json, io
 from urllib.parse import quote
@@ -15,7 +16,7 @@ from telegram.error import Forbidden, BadRequest
 # --- BÖLÜM 1: NÖBETÇİ KULÜBESİ ---
 app = Flask('')
 @app.route('/')
-def home(): return "Lord Checker Karargahı ayakta."
+def home(): return "ApiServisim Lord Botu Karargahı ayakta."
 def run_flask(): app.run(host='0.0.0.0',port=8080)
 def keep_alive(): Thread(target=run_flask).start()
 
@@ -26,45 +27,37 @@ except ImportError:
     print("KRİTİK HATA: 'bot_token.py' dosyası bulunamadı!"); exit()
 
 # -----------------------------------------------------------------------------
-# 3. BİRİM: İSTİHBARAT & OPERASYON (DÜZELTİLMİŞ)
+# 3. BİRİM: İSTİHBARAT & OPERASYON (ApiServisim Özel Harekat)
 # -----------------------------------------------------------------------------
 class ApiServiceChecker:
     def __init__(self, key):
-        self.base_url = "https://apiservisim.store/" # YENİ, ÇALIŞAN ADRES
+        self.base_url = "https://apiservisim.store/"
         self.key = key
         self.session = requests.Session()
         self.session.headers.update({'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"})
         self.timeout = 30
 
     def login(self) -> bool:
-        """Anahtarla apiservisim.store'a giriş yapar."""
         try:
-            # DÜZELTME: Giriş, giris.php'ye POST ile yapılıyor.
             login_url = f"{self.base_url}giris.php"
             payload = {'key': self.key}
             response = self.session.post(login_url, data=payload, allow_redirects=True)
-            # Başarılı girişte son URL index.php olmalı.
             if response.ok and "index.php" in response.url:
                 logging.info("ApiServiceChecker girişi başarılı.")
                 return True
             else:
-                logging.error(f"ApiServiceChecker giriş başarısız. Son URL: {response.url}, Durum Kodu: {response.status_code}")
+                logging.error(f"ApiServiceChecker giriş başarısız. Son URL: {response.url}")
                 return False
         except Exception as e:
             logging.error(f"ApiServiceChecker giriş hatası: {e}"); return False
 
     def _check(self, gateway_php_file, card):
         try:
-            # API'ler ana dizinde
+            # Gelen bilgilere göre API dosyaları ana dizinde
             endpoint = f"{self.base_url}{gateway_php_file}"
-            form_data = {'lista': card} # Key session'da zaten var
+            form_data = {'lista': card} # Key session'da zaten var, tekrar yollamaya gerek yok.
             response = self.session.post(endpoint, data=form_data, timeout=self.timeout)
-            result_text = response.text.strip()
-            # Gelen cevabı biraz daha anlaşılır yapalım
-            if "approved" in result_text.lower() or "live" in result_text.lower() or "✅" in result_text:
-                return f"✅ {result_text}"
-            else:
-                return f"❌ {result_text}"
+            return response.text.strip()
         except requests.exceptions.RequestException as e:
             return f"❌ HATA ({gateway_php_file}): {e}"
 
@@ -179,11 +172,13 @@ async def addadmin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     result = user_manager.activate_admin(update.effective_user.id, key)
     if result == "Success": await update.message.reply_text("✅ Ferman kabul edildi! Artık Komuta Kademesindesin.")
     else: await update.message.reply_text(f"❌ {result}")
+
 async def logs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_manager: UserManager = context.bot_data['user_manager']
     if not user_manager.is_user_admin(update.effective_user.id): await update.message.reply_text("Bu emri sadece Komuta Kademesi verebilir."); return
     if os.path.exists("terminator_logs.txt"): await update.message.reply_document(document=open("terminator_logs.txt", 'rb'), caption="İstihbarat raporu.")
     else: await update.message.reply_text("Henüz toplanmış bir istihbarat yok.")
+
 async def duyuru_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_manager: UserManager = context.bot_data['user_manager']
     if not user_manager.is_user_admin(update.effective_user.id): await update.message.reply_text("Bu emri sadece Komuta Kademesi verebilir."); return
@@ -196,6 +191,7 @@ async def duyuru_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try: await context.bot.send_message(chat_id=int(user_id), text=f"📣 **Komuta Kademesinden Ferman Var:**\n\n{duyuru_mesaji}"); success += 1
         except Exception: fail += 1; time.sleep(0.1)
     await update.message.reply_text(f"✅ Ferman operasyonu tamamlandı!\nBaşarıyla gönderildi: {success}\nBaşarısız: {fail}")
+
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query; await query.answer(); action = query.data; new_text = None
     if action == "activate_start": context.user_data['awaiting_key'] = True; new_text = "🔑 Lütfen sana verilen anahtarı şimdi gönder."
@@ -209,6 +205,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try: await query.edit_message_text(text=new_text, parse_mode=ParseMode.MARKDOWN)
         except BadRequest as e:
             if "Message is not modified" not in str(e): logging.warning(f"Button callback hatası: {e}")
+
 async def main_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_manager: UserManager = context.bot_data['user_manager']
     if context.user_data.get('awaiting_key', False):
@@ -229,6 +226,7 @@ async def main_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         result = check_function(card); log_activity(update.effective_user, card, result)
         await update.message.reply_text(f"KART: {card}\nSONUÇ: {result}")
         context.user_data.pop('mode', None); context.user_data.pop('checker_method', None)
+
 async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_manager: UserManager = context.bot_data['user_manager']
     if not user_manager.is_user_activated(update.effective_user.id): return
@@ -278,7 +276,7 @@ def main():
     if not api_service_checker.login(): print("UYARI: ApiServiceChecker'a giriş yapılamadı!")
     else: print("ApiServiceChecker birimi aktif.")
     user_manager_instance = UserManager(initial_admin_id=ADMIN_ID)
-    print("Lordlar Kulübü (v40 - Nihai Fetih) aktif...")
+    print("Lordlar Kulübü (v41 - Nihai Tövbe) aktif...")
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     application.bot_data['api_service_checker'] = api_service_checker
     application.bot_data['user_manager'] = user_manager_instance
