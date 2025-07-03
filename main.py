@@ -35,7 +35,7 @@ class PuanChecker:
         self.target_api_url = "https://kaderchecksystem.xyz/xrayefe.php" # HTTPS'e geçildi
         self.session = requests.Session()
         # User-Agent değiştirildi
-        self.session.headers.update({'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36"})
+        self.session.headers.update({'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"})
         self.timeout = 25
         self.proxies = self._load_proxies("proxies.txt")
         if not self.proxies:
