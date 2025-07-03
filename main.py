@@ -1,5 +1,5 @@
 # --- DOSYA: main.py (v40 - NİHAİ TÖVBE SÜRÜMÜ) ---
-# BÜTÜN HATALAR DÜZELTİLDİ. BU SON KOD.
+# Bütün hatalar düzeltildi. Login mantığı ve komutlar tamir edildi. Bu son kod.
 
 import logging, requests, time, os, re, json, io
 from urllib.parse import quote
@@ -30,23 +30,21 @@ except ImportError:
 # -----------------------------------------------------------------------------
 class ApiServiceChecker:
     def __init__(self, key):
-        self.base_url = "https://apiservisim.site/"
+        self.base_url = "https://apiservisim.store/" # YENİ, ÇALIŞAN ADRES
         self.key = key
         self.session = requests.Session()
         self.session.headers.update({'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"})
         self.timeout = 30
 
     def login(self) -> bool:
-        """Anahtarla apiservisim.site'a giriş yapar."""
+        """Anahtarla apiservisim.store'a giriş yapar."""
         try:
-            # DÜZELTME: Giriş, giris.php'ye POST atılarak yapılıyor.
+            # DÜZELTME: Giriş, giris.php'ye POST ile yapılıyor.
             login_url = f"{self.base_url}giris.php"
             payload = {'key': self.key}
-            # allow_redirects=True önemli, çünkü başarılı girişte bizi yönlendiriyor.
             response = self.session.post(login_url, data=payload, allow_redirects=True)
-            
-            # Başarılı girişte son URL checker.php olmalı.
-            if response.ok and "checker.php" in response.url:
+            # Başarılı girişte son URL index.php olmalı.
+            if response.ok and "index.php" in response.url:
                 logging.info("ApiServiceChecker girişi başarılı.")
                 return True
             else:
@@ -57,10 +55,16 @@ class ApiServiceChecker:
 
     def _check(self, gateway_php_file, card):
         try:
-            endpoint = f"{self.base_url}{gateway_php_file}" # API dosyaları ana dizinde
-            form_data = {'lista': card} # Key'i her seferinde yollamaya gerek yok, session'da kayıtlı
+            # API'ler ana dizinde
+            endpoint = f"{self.base_url}{gateway_php_file}"
+            form_data = {'lista': card} # Key session'da zaten var
             response = self.session.post(endpoint, data=form_data, timeout=self.timeout)
-            return response.text.strip()
+            result_text = response.text.strip()
+            # Gelen cevabı biraz daha anlaşılır yapalım
+            if "approved" in result_text.lower() or "live" in result_text.lower() or "✅" in result_text:
+                return f"✅ {result_text}"
+            else:
+                return f"❌ {result_text}"
         except requests.exceptions.RequestException as e:
             return f"❌ HATA ({gateway_php_file}): {e}"
 
@@ -70,7 +74,7 @@ class ApiServiceChecker:
     def check_exx(self, card): return self._check('exxenapi.php', card)
 
 # -----------------------------------------------------------------------------
-# 4. BİRİM: LORDLAR SİCİL DAİRESİ (User Manager) - Değişiklik yok
+# 4. BİRİM: LORDLAR SİCİL DAİRESİ (User Manager)
 # -----------------------------------------------------------------------------
 class UserManager:
     def __init__(self, initial_admin_id):
@@ -162,8 +166,6 @@ def checker_command_factory(method_name, display_name):
         await update.message.reply_text(f"**{display_name}** cephesi seçildi. Tarama modunu seç Lord'um:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
     return command_handler
 
-# <<< İŞTE İKİNCİ DÜZELTME BURADA >>>
-# Eksik olan /ayikla komutunu geri ekliyoruz.
 async def ayikla_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_manager: UserManager = context.bot_data['user_manager']
     if not user_manager.is_user_activated(update.effective_user.id):
@@ -239,7 +241,7 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         approved_kartlar_text = ""; mevcut_kart = ""
         for line in file_content.splitlines():
             if line.strip().startswith("KART:"): mevcut_kart = line.strip()
-            elif line.strip().startswith("SONUÇ:") and ("Approved" in line or "✅" in line):
+            elif line.strip().startswith("SONUÇ:") and ("Approved" in line or "✅" in line or "Live" in line):
                 if mevcut_kart: full_entry = f"{mevcut_kart}\n{line.strip()}\n\n"; approved_kartlar_text += full_entry; mevcut_kart = ""
             elif not line.strip(): mevcut_kart = ""
         context.user_data.pop('awaiting_sort_file', None)
@@ -276,7 +278,7 @@ def main():
     if not api_service_checker.login(): print("UYARI: ApiServiceChecker'a giriş yapılamadı!")
     else: print("ApiServiceChecker birimi aktif.")
     user_manager_instance = UserManager(initial_admin_id=ADMIN_ID)
-    print("Lordlar Kulübü (v39 - Nihai Fetih) aktif...")
+    print("Lordlar Kulübü (v40 - Nihai Fetih) aktif...")
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     application.bot_data['api_service_checker'] = api_service_checker
     application.bot_data['user_manager'] = user_manager_instance
@@ -287,7 +289,7 @@ def main():
     application.add_handler(CommandHandler("pv1", checker_command_factory('check_pv1', 'Puan V1')))
     application.add_handler(CommandHandler("pv2", checker_command_factory('check_pv2', 'Puan V2')))
     application.add_handler(CommandHandler("exx", checker_command_factory('check_exx', 'Exxen')))
-    application.add_handler(CommandHandler("ayikla", ayikla_command)) # EKSİK KOMUT GERİ GELDİ
+    application.add_handler(CommandHandler("ayikla", ayikla_command))
     application.add_handler(CommandHandler("addadmin", addadmin_command))
     application.add_handler(CommandHandler("logs", logs_command))
     application.add_handler(CommandHandler("duyuru", duyuru_command))
