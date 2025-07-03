@@ -1,7 +1,7 @@
-# --- DOSYA: main.py (v43 - NİHAİ İMPARATORLUK / SADECE PUAN BOTU) ---
-# Bütün diğer cepheler kapatıldı. Sadece PuanChecker devrede. Bütün özellikler dahil.
+# --- DOSYA: main.py (v46 - NİHAİ KADER ORDUSU) ---
+# Sadece Kadercheck. Proxy ve otomatik tekrar deneme sistemi eklendi. Bütün özellikler dahil.
 
-import logging, requests, time, os, re, json, io
+import logging, requests, time, os, re, json, io, random
 from urllib.parse import quote
 from datetime import datetime
 from flask import Flask
@@ -26,24 +26,25 @@ except ImportError:
     print("KRİTİK HATA: 'bot_token.py' dosyası bulunamadı!"); exit()
 
 # -----------------------------------------------------------------------------
-# 3. BİRİM: İSTİHBARAT & OPERASYON (PuanChecker - ZIRHLI)
+# 3. BİRİM: İSTİHBARAT & OPERASYON (PuanChecker - HAYALET MODU)
 # -----------------------------------------------------------------------------
 class PuanChecker:
     def __init__(self, key):
-        self.login_url = "https://kaderchecksystem.xyz/"
+        self.login_url = "https://kaderchecksystem.xyz/" # HTTPS'e geçildi
         self.key = key
-        self.target_api_url = "https://kaderchecksystem.xyz/xrayefe.php"
+        self.target_api_url = "https://kaderchecksystem.xyz/xrayefe.php" # HTTPS'e geçildi
         self.session = requests.Session()
+        # User-Agent değiştirildi
         self.session.headers.update({'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36"})
         self.timeout = 25
         self.proxies = self._load_proxies("proxies.txt")
+        if not self.proxies:
+            logging.warning("UYARI: 'proxies.txt' dosyası bulunamadı! Bot proxysiz çalışacak ve muhtemelen engellenecek.")
 
     def _load_proxies(self, filename):
-        if not os.path.exists(filename):
-            logging.warning("UYARI: 'proxies.txt' dosyası bulunamadı! Proxysiz çalışılacak.")
-            return []
+        if not os.path.exists(filename): return []
         with open(filename, "r") as f:
-            return [line.strip() for line in f if line.strip()]
+            return [line.strip() for line in f if line.strip() and ":" in line]
 
     def login(self) -> bool:
         try:
@@ -52,29 +53,45 @@ class PuanChecker:
         except requests.exceptions.RequestException as e:
             logging.error(f"PuanChecker giriş hatası: {e}"); return False
 
+    def check_card(self, card):
+        max_retries = 5 # Toplamda 5 farklı proxy denesin
+        
+        # Eğer proxy listesi boşsa, direkt bağlan ve sonucu neyse onu dön.
+        if not self.proxies:
+            return self._send_request(card, None)
+
+        # Proxy listesini karıştır ve denemeye başla
+        denenen_proxyler = self.proxies.copy()
+        random.shuffle(denenen_proxyler)
+        
+        for i in range(min(max_retries, len(denenen_proxyler))):
+            proxy = denenen_proxyler[i]
+            result = self._send_request(card, proxy)
+            # Eğer "Erişim engellendi" hatası almazsak veya proxy hatası almazsak, sonucu döndür ve çık
+            if "Erişim engellendi" not in result and "Proxy'ye bağlanılamadı" not in result:
+                return result
+            logging.warning(f"'{result}' hatası alındı, yeni proxy deniyor... ({i+1}/{max_retries})")
+            time.sleep(1) # Hatalı denemeler arasında bekle
+            
+        return "❌ HATA: Bütün proxy denemeleri başarısız oldu veya hepsi engellendi."
+
     def _send_request(self, card, proxy):
+        """Tek bir istek gönderen ve sonucu döndüren fonksiyon."""
         try:
-            proxy_dict = {"http": f"http://{proxy}", "https": f"http://{proxy}"} if proxy else None
-            formatted_card = quote(card)
-            full_url = f"{self.target_api_url}?card={formatted_card}"
-            response = self.session.get(full_url, timeout=self.timeout, proxies=proxy_dict)
-            return response.text.strip()
+            proxy_dict = {"http": f"http://{proxy}", "https": f"https://{proxy}"} if proxy else None
+            
+            # Bu session, login'de oluşturulmuş ve cookie'leri içeren session'dır.
+            # Her istekte aynı session'ı kullanmak önemlidir.
+            response = self.session.get(f"{self.target_api_url}?card={quote(card)}", timeout=self.timeout, proxies=proxy_dict)
+            
+            response_text = response.text.strip()
+            if not response_text:
+                return "HATA: Hedef API'den boş cevap geldi."
+            return response_text
         except requests.exceptions.ProxyError:
             return f"HATA: Proxy'ye bağlanılamadı ({proxy})"
         except requests.exceptions.RequestException as e:
             return f"HATA: {e}"
-
-    def check_card(self, card):
-        max_retries = 3
-        for i in range(max_retries):
-            proxy = random.choice(self.proxies) if self.proxies else None
-            result = self._send_request(card, proxy)
-            if "Erişim engellendi" not in result:
-                return result
-            logging.warning(f"Erişim engellendi, yeni proxy deniyor... ({i+1}/{max_retries})")
-            time.sleep(1)
-        return "❌ HATA: Erişim engellendi, bütün denemeler başarısız."
-
 
 # -----------------------------------------------------------------------------
 # 4. BİRİM: LORDLAR SİCİL DAİRESİ (User Manager)
@@ -126,13 +143,12 @@ def log_activity(user: User, card: str, result: str):
 async def bulk_check_job(context: ContextTypes.DEFAULT_TYPE):
     job_data = context.job.data; user_id = job_data['user_id']; user = job_data['user']
     cards = job_data['cards']; progress_message_id = job_data['progress_message_id']
-    total_cards = len(cards)
-    site_checker: PuanChecker = context.bot_data['puan_checker']
+    total_cards = len(cards); site_checker: PuanChecker = context.bot_data['puan_checker']
     report_content = ""; last_update_time = time.time()
     try:
         for i, card in enumerate(cards):
             result = site_checker.check_card(card); log_activity(user, card, result)
-            report_content += f"KART: {card}\nSONUÇ: {result}\n\n"; time.sleep(0.5)
+            report_content += f"KART: {card}\nSONUÇ: {result}\n\n"; time.sleep(1)
             current_time = time.time()
             if (i + 1) % 10 == 0 or current_time - last_update_time > 3:
                 progress = i + 1; progress_percent = int((progress / total_cards) * 10)
@@ -158,7 +174,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Lord Checker'a hoşgeldin,\nherhangi bir sorunun olursa Owner: @tanriymisimben e sorabilirsin.")
         keyboard = [[InlineKeyboardButton("Evet, bir key'im var ✅", callback_data="activate_start"), InlineKeyboardButton("Hayır, bir key'im yok", callback_data="activate_no_key")]]
         await update.message.reply_text("Botu kullanmak için bir key'in var mı?", reply_markup=InlineKeyboardMarkup(keyboard))
-
 async def puan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_manager: UserManager = context.bot_data['user_manager']
     if not user_manager.is_user_activated(update.effective_user.id):
@@ -166,27 +181,23 @@ async def puan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['checker_info'] = {'type': 'puan', 'method': 'check_card'}
     keyboard = [[InlineKeyboardButton("Tekli Kontrol", callback_data="mode_single"), InlineKeyboardButton("Çoklu Kontrol", callback_data="mode_multiple")]]
     await update.message.reply_text(f"**PUAN** cephesi seçildi. Tarama modunu seç Lord'um:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN)
-
 async def ayikla_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_manager: UserManager = context.bot_data['user_manager']
     if not user_manager.is_user_activated(update.effective_user.id):
         await update.message.reply_text("Bu komutu kullanmak için önce /start yazarak bir anahtar aktive etmelisin."); return
     context.user_data['awaiting_sort_file'] = True
     await update.message.reply_text("Ganimet ayıklama emri alındı.\nİçinde karışık sonuçların olduğu `.txt` dosyasını gönder.")
-
 async def addadmin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_manager: UserManager = context.bot_data['user_manager']; key = context.args[0] if context.args else None
     if not key: await update.message.reply_text("Kullanım: `/addadmin <admin-anahtarı>`"); return
     result = user_manager.activate_admin(update.effective_user.id, key)
     if result == "Success": await update.message.reply_text("✅ Ferman kabul edildi! Artık Komuta Kademesindesin.")
     else: await update.message.reply_text(f"❌ {result}")
-
 async def logs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_manager: UserManager = context.bot_data['user_manager']
     if not user_manager.is_user_admin(update.effective_user.id): await update.message.reply_text("Bu emri sadece Komuta Kademesi verebilir."); return
     if os.path.exists("terminator_logs.txt"): await update.message.reply_document(document=open("terminator_logs.txt", 'rb'), caption="İstihbarat raporu.")
     else: await update.message.reply_text("Henüz toplanmış bir istihbarat yok.")
-
 async def duyuru_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_manager: UserManager = context.bot_data['user_manager']
     if not user_manager.is_user_admin(update.effective_user.id): await update.message.reply_text("Bu emri sadece Komuta Kademesi verebilir."); return
@@ -199,7 +210,6 @@ async def duyuru_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try: await context.bot.send_message(chat_id=int(user_id), text=f"📣 **Komuta Kademesinden Ferman Var:**\n\n{duyuru_mesaji}"); success += 1
         except Exception: fail += 1; time.sleep(0.1)
     await update.message.reply_text(f"✅ Ferman operasyonu tamamlandı!\nBaşarıyla gönderildi: {success}\nBaşarısız: {fail}")
-
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query; await query.answer(); action = query.data; new_text = None
     if action == "activate_start": context.user_data['awaiting_key'] = True; new_text = "🔑 Lütfen sana verilen anahtarı şimdi gönder."
@@ -213,7 +223,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try: await query.edit_message_text(text=new_text, parse_mode=ParseMode.MARKDOWN)
         except BadRequest as e:
             if "Message is not modified" not in str(e): logging.warning(f"Button callback hatası: {e}")
-
 async def main_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_manager: UserManager = context.bot_data['user_manager']
     if context.user_data.get('awaiting_key', False):
@@ -232,9 +241,6 @@ async def main_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         result = site_checker.check_card(card); log_activity(update.effective_user, card, result)
         await update.message.reply_text(f"KART: {card}\nSONUÇ: {result}")
         context.user_data.pop('mode', None); context.user_data.pop('checker_info', None)
-    elif context.user_data.get('awaiting_bulk_file'):
-        await update.message.reply_text("Kardeşim laf değil, dosya atman lazım. İçinde kartlar olan bir `.txt` dosyası.")
-
 async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_manager: UserManager = context.bot_data['user_manager']
     if not user_manager.is_user_activated(update.effective_user.id): return
@@ -284,7 +290,7 @@ def main():
     if not puan_checker.login(): print("UYARI: PuanChecker'a giriş yapılamadı! Key veya site adresi değişmiş olabilir.")
     else: print("PuanChecker birimi aktif.")
     user_manager_instance = UserManager(initial_admin_id=ADMIN_ID)
-    print("Lordlar Kulübü (Nihai Sürüm) aktif...")
+    print("Lordlar Kulübü (v45 - Hayalet Ordu) aktif...")
     application = Application.builder().token(TELEGRAM_TOKEN).build()
     application.bot_data['puan_checker'] = puan_checker
     application.bot_data['user_manager'] = user_manager_instance
